@@ -361,7 +361,7 @@ export function pairUp(items, lex, lang) {
   const short = (i, max) => !i.q && i.n <= max;
   /* 1. A word and the word that answers it. The word is most of what each one says. */
   const mostly = (i, list) => { const w = short(i, 16) ? saysOne(i.t, list) : ''; return !!w && i.core.length <= charLen(w) + 6; };
-  (lex.echo || []).forEach(([L, R]) => cross(T.filter(i => mostly(i, L)), T.filter(i => mostly(i, R)), 'echo', L[0], 10));
+  (lex.echo || []).forEach(([L, R]) => cross(T.filter(i => mostly(i, L)), T.filter(i => mostly(i, R)), 'echo', L[0], 24));
   /* 2. A question, and a short saying that has one of the question's words in it. */
   T.filter(i => i.q && i.n <= 24).forEach(i => {
     keywordsOf(i.x.text).forEach(K => cross([i], T.filter(j => short(j, 16) && j.t.includes(K)), 'ask', K, 2));
@@ -370,7 +370,7 @@ export function pairUp(items, lex, lang) {
   (lex.kin || []).forEach(group => {
     const by = group.map(w => [w, T.filter(i => short(i, 18) && saysWord(i.t, w))]).filter(x => x[1].length);
     let n = 0;
-    mix(by).forEach(([w, A]) => mix(by).forEach(([v, B]) => { if (w !== v && n < 10) { const before = out.length; cross(A, B, 'kin', w, 2, true); n += out.length - before; } }));
+    mix(by).forEach(([w, A]) => mix(by).forEach(([v, B]) => { if (w !== v && n < 30) { const before = out.length; cross(A, B, 'kin', w, 4, true); n += out.length - before; } }));
   });
   /* 4. Two sayings with the same word in them. */
   const byWord = new Map();
@@ -380,9 +380,34 @@ export function pairUp(items, lex, lang) {
   const agree = T.filter(i => (lex.agree || []).some(w => i.core === w || (i.core.startsWith(w) && i.core.length <= charLen(w) + 2)));
   const remark = T.filter(i => short(i, 16) && i.n >= 4 && !agree.includes(i) && /[なねわよ][ぁあー〜]*$/.test(i.core));
   /* A remark that was a post of its own reads best; a reply's remark may hang on what it answered. */
-  cross(remark.filter(i => !i.x.reply), agree, 'agree', '', 40);
-  cross(remark.filter(i => i.x.reply), agree, 'agree', '', 16);
-  return out.slice(0, 1200);
+  cross(remark.filter(i => !i.x.reply), agree, 'agree', '', 80);
+  cross(remark.filter(i => i.x.reply), agree, 'agree', '', 40);
+  /* 6. Two short sayings with no word in common: a reply that does not fit the post (今USJ beside ディズニー). */
+  const shorts = T.filter(i => !i.q && i.n >= 2 && i.n <= 28);
+  let mismatch = 0;
+  for (const a of mix(shorts)) {
+    if (mismatch >= 500) break;
+    const kwA = new Set(keywordsOf(a.x.text));
+    for (const b of mix(shorts)) {
+      if (mismatch >= 500) break;
+      if (a.x.id === b.x.id) continue;
+      const kwB = new Set(keywordsOf(b.x.text));
+      if ([...kwA].some(k => kwB.has(k))) continue;
+      const open = a.n >= b.n ? a : b, ans = a.n >= b.n ? b : a;
+      if (add(open, ans, 'mismatch', '')) mismatch++;
+    }
+  }
+  /* 7. Pairs drawn at random after the rules above — many combinations that share no rule. */
+  const pool = mix(T.filter(i => i.n <= 32 && i.n >= 2));
+  let random = 0;
+  for (let i = 0; i < pool.length && random < 400; i++) {
+    for (let j = i + 1; j < pool.length && random < 400; j++) {
+      const a = pool[i], b = pool[j];
+      const open = a.n >= b.n ? a : b, ans = a.n >= b.n ? b : a;
+      if (add(open, ans, 'random', '')) random++;
+    }
+  }
+  return out.slice(0, 2000);
 }
 /* A post that asks something. */
 export const asks = text => /[？?][\s\p{Extended_Pictographic}️]*$/u.test(String(text || '').trim());

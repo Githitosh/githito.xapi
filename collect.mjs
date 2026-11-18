@@ -394,7 +394,7 @@ async function matchOf(lang, genres, talks, source) {
     t.replies.forEach(r => addSay({ ...r, reply: true, to: t.post.id, found: t.found }));
   });
   lines.forEach(l => addSay({ ...l, reply: true, found: l.found }));
-  const kept = says.slice(0, CONF.says);
+  const kept = shuffle(says).slice(0, CONF.says);
   const pairs = LEX[lang] ? pairUp(kept, LEX[lang], lang) : [];
   const kinds = {};
   pairs.forEach(p => { kinds[p.kind] = (kinds[p.kind] || 0) + 1; });

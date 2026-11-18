@@ -12,7 +12,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { CJK, plain, talkPost, pickReplies, stamp, readJson, writeApi, writeIndex, young } from './rules.mjs';
+import { CJK, plain, talkPost, pickReplies, stamp, readJson, writeApi, writeIndex, young, readEmbed } from './rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -25,30 +25,14 @@ const KEEP = FILE.keep || 500;
 const DRY = flag('dry');
 const LINK = /https?:\/\/(?:mobile\.|www\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status(?:es)?\/(\d+)/gi;
 
-/* ---------- X's official embed API ---------- */
-const entities = t => t.replace(/&mdash;/g, '—').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, ' ')
-  .replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(Number(d))).replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCodePoint(parseInt(h, 16)));
-/* The answer is the post as a quote; its words are the first paragraph. Links to pictures and pages are left out. */
-function wordsOf(html) {
-  const m = String(html || '').match(/<blockquote[^>]*>\s*<p[^>]*>([\s\S]*?)<\/p>/i);
-  if (!m) return '';
-  return entities(m[1].replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, (all, t) => (/^(?:https?:\/\/|pic\.(?:twitter|x)\.com\/)|^[\w-]+(?:\.[\w-]+)+\//i.test(t.trim()) ? ' ' : t))
-    .replace(/<[^>]+>/g, ''));
-}
+/* A link read through X's official embed API, as the plain record the rules read.
+   What the embed API does not say is left empty. */
 async function readLink(handle, id) {
-  const url = 'https://x.com/' + handle + '/status/' + id;
-  let data = null;
-  try {
-    const res = await fetch('https://publish.x.com/oembed?omit_script=1&dnt=true&url=' + encodeURIComponent(url), { signal: AbortSignal.timeout(20000) });
-    if (res.ok) data = await res.json();
-  } catch (e) {}
-  if (!data || !data.html) return null;
-  const who = (String(data.author_url || '').match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})/i) || [])[1] || handle;
-  /* The same plain record the collector's rules read. What the embed API does not say is left empty. */
+  const e = await readEmbed(handle, id);
+  if (!e) return null;
   return {
-    id: String(id), raw: wordsOf(data.html),
-    user: { username: who, name: data.author_name || '', description: '', protected: false, org: false, followers: 0 },
+    id: e.id, raw: e.raw,
+    user: { username: e.handle, name: e.name, description: '', protected: false, org: false, followers: 0 },
     replyTo: '', isReply: false, quote: false, repost: false, replies: 1, likes: 0, sensitive: false, media: false, at: '',
   };
 }

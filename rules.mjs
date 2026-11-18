@@ -14,7 +14,7 @@ const NEVER = /ヤリモク|風俗|パパ活|ママ活|援交|AV女優|アダル
 const UNSAFE = new RegExp(ADULT.source + '|' + NEVER.source, 'i');
 const MINOR_BIO = /(?:^|[^0-9])1[0-7]\s*(?:歳|才|y\/?o\b|years? old)|高[1-3１-３一二三](?:$|[^0-9０-９])|中[1-3１-３一二三](?:$|[^0-9０-９])|高校生|中学生|ＪＫ|ＪＣ|\bJ[KC]\b|\bminor\b|\bunder ?18\b|\bteen\b/i;
 const AD = /PR|広告|キャンペーン|プレゼント企画|応募|フォロー[&＆]|RTで|リツイートで|セール|クーポン|予約受付|販売中|\bgiveaway\b|\bsale\b|\bpromo\b|\bdiscount\b|\bsponsored\b/i;
-const TOXIC = /バカ|ばか(?!り)|馬鹿|アホ|あほ(?!う)|阿呆|クズ|カス(?![タテ])|キモ[いイッ]|きも[いっ]|気持ち悪|気色[わ悪]|ウザ|うざ[いっ]|消えろ|黙れ|だまれ|お前|おまえ|てめ[えぇー]|貴様|低脳|低能|無能|老害|痴呆|キチガイ|ガイジ|チー牛|ブス|デブ|ババア|ジジイ|嘘つき|ウソつき|うそつき|捏造|売国|反日|左翼|右翼|パヨク|ネトウヨ|恥を知|頭悪|頭おかし|\b(?:idiot|stupid|moron|dumb|loser|trash|shut up|stfu|libtard|clown)\b/i;
+const TOXIC = /バカ|ばか(?!り)|馬鹿|アホ|あほ(?!う)|阿呆|クズ|カス(?![タテ])|キモ(?:[いイッ]|$)|きも[いっ]|気持ち悪|気色[わ悪]|ウザ|うざ[いっ]|消えろ|黙れ|だまれ|お前|おまえ|てめ[えぇー]|貴様|低脳|低能|無能|老害|痴呆|キチガイ|ガイジ|チー牛|ブス|デブ|ババア|ジジイ|嘘つき|ウソつき|うそつき|捏造|売国|反日|左翼|右翼|パヨク|ネトウヨ|恥を知|頭悪|頭おかし|\b(?:idiot|stupid|moron|dumb|loser|trash|shut up|stfu|libtard|clown)\b/i;
 const GREET = /^[\s\p{Extended_Pictographic}️]*(?:おは|オハ|こんにち|こんばん|おやす|おつ|お疲れ|おめで|ありがと|はじめまして|初めまして|good morning|gm\b|good night|congrat|thank)|良い一日|よい一日|良い1日|素敵な(?:一日|1日|週末)|今日も(?:一日|1日)?(?:頑張|がんば|よろしく)|よろしくお願い|フォロー(?:ありがとう|失礼|させて)|have a (?:great|good|nice) day/iu;
 const GLOOM = /骨折|折って|怪我|ケガ|手術|通院|発熱|インフル|コロナ|訃報|葬儀|お葬式|遺影|倒産|解雇|失業|借金|離婚|亡き|\b(?:injur|surgery|funeral|divorce|laid off|fired)\w*/i;
 const OFFICIAL = /公式|official|ニュース|新聞|news|報道|速報|通信社|放送|テレビ|編集部|広報|株式会社|\bbot\b|情報局|まとめ|運営|事務局|shop|store/i;
@@ -106,6 +106,36 @@ export function pickReplies(post, list, lang, chosen) {
   const kept = chosen ? (picks.some(x => x.punch) ? picks.filter(x => x.punch) : picks.slice(0, 1)) : picks;
   return kept.slice(0, 2).map(({ tk, score, punch, ...r }) => r);
 }
+
+/* ---------- X's official embed API ---------- */
+/* publish.x.com/oembed: X publishes it for showing posts on other sites. No key, no charge, no login.
+   It answers with the post as a quote; its words are the first paragraph. Links to pictures and pages are left out. */
+const entities = t => t.replace(/&mdash;/g, '—').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, ' ')
+  .replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(Number(d))).replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCodePoint(parseInt(h, 16)));
+function wordsOf(html) {
+  const m = String(html || '').match(/<blockquote[^>]*>\s*<p[^>]*>([\s\S]*?)<\/p>/i);
+  if (!m) return '';
+  return entities(m[1].replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, (all, t) => (/^(?:https?:\/\/|pic\.(?:twitter|x)\.com\/)|^[\w-]+(?:\.[\w-]+)+\//i.test(t.trim()) ? ' ' : t))
+    .replace(/<[^>]+>/g, ''));
+}
+/* A post read from X itself: its words and who wrote it. null when X does not show it (deleted, private). */
+export async function readEmbed(handle, id) {
+  const url = 'https://x.com/' + handle + '/status/' + id;
+  let data = null;
+  for (let attempt = 0; attempt < 2 && !data; attempt++) {
+    try {
+      const res = await fetch('https://publish.x.com/oembed?omit_script=1&dnt=true&url=' + encodeURIComponent(url), { signal: AbortSignal.timeout(20000) });
+      if (res.ok) data = await res.json();
+      else if (res.status === 404 || res.status === 403) return null;
+    } catch (e) {}
+  }
+  if (!data || !data.html) return null;
+  const who = (String(data.author_url || '').match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})/i) || [])[1] || handle;
+  return { id: String(id), handle: who, name: data.author_name || '', raw: wordsOf(data.html) };
+}
+/* The same words, whatever the spaces and marks. */
+export const sameWords = (a, b) => squash(plain(a)) === squash(plain(b));
 
 /* ---------- the API's files ---------- */
 /* One language: every talk, and one file for each genre (the answer to "search this genre"). */

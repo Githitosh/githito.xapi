@@ -11,17 +11,20 @@
      node collect.mjs --add 40        stop after 40 new talks (170 unless told)
      node collect.mjs --dry           print the counts, write nothing
 
-   The posts come from X's own API (v2, recent search), with the key X_BEARER_TOKEN. No other service is
-   asked. config.json ("source"), or XAPI_SOURCE, switches it:
-     off        nothing is collected. This is how the repository starts.
-     official   X's own API. Needs the key.
+   How the posts are found is set in config.json ("source"), or by XAPI_SOURCE:
+     fxtwitter  api.fxtwitter.com is asked which posts there are, with this program's own words
+                (words.json). It only finds: which posts become talks is decided here (rules.mjs), and
+                the words and the writer of every post kept are read again from X's official embed API
+                (publish.x.com). A post whose words differ from what X itself shows is dropped.
+     official   X's own API (v2, recent search). Needs the key X_BEARER_TOKEN; X charges for every post
+                it returns, so a run stops at a number of posts ("reads" in config.json).
      auto       official when the key is set, otherwise off.
-   X charges for every post it returns, so a run stops at a number of posts ("reads" in config.json).
+     off        nothing is collected.
    Node 20 or newer; no packages to install. */
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { talkPost, zest, pickReplies, stamp, readJson, writeApi, writeIndex, young } from './rules.mjs';
+import { talkPost, zest, pickReplies, stamp, readJson, writeApi, writeIndex, young, readEmbed, sameWords, plain } from './rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -39,7 +42,7 @@ const CONF = {
   keep: num('keep', FILE.keep || 500), // talks the API holds
   searches: num('searches', 60), // searches one run may make
   reads: num('reads', FILE.reads || 300), // posts X may return in one run (X charges for each)
-  perWord: num('perword', 4),    // talks one word may give in a run
+  perWord: num('perword', 6),    // talks one word may give in a run
   hours: num('hours', 48),       // a talk leaves the API after this many hours
   pause: num('pause', 4000),     // milliseconds between two searches
   dry: flag('dry'),
@@ -52,6 +55,63 @@ let asked = 0;
 let read = 0;
 class Refused extends Error {}
 const iso = v => { const t = Date.parse(v); return Number.isFinite(t) ? new Date(t).toISOString().replace(/\.\d+Z$/, 'Z') : ''; };
+/* api.fxtwitter.com: asked only which posts there are (a search with this program's words, and the replies
+   under a post). What it answers is not what is saved: see confirm() below. */
+const fx = {
+  name: 'fxtwitter',
+  confirm: true,
+  record(st) {
+    const a = (st && st.author) || {};
+    const v = (a.verification && a.verification.type) || '';
+    return {
+      id: String((st && st.id) || ''), raw: String((st && st.text) || ''),
+      user: { username: String(a.screen_name || ''), name: a.name || '', description: a.description || '', protected: !!a.protected, org: v === 'organization' || v === 'government', followers: a.followers || 0 },
+      replyTo: st && st.replying_to && st.replying_to.status ? String(st.replying_to.status) : '', isReply: !!(st && st.replying_to),
+      quote: !!(st && st.quote), repost: !!(st && st.reposted_by), replies: (st && st.replies) || 0, likes: (st && st.likes) || 0,
+      sensitive: !!(st && st.possibly_sensitive), media: !!(st && st.media && Object.keys(st.media).length), at: iso(st && st.created_at),
+    };
+  },
+  async get(pathname) {
+    asked++;
+    let res;
+    try { res = await fetch((process.env.XAPI_FX_BASE || 'https://api.fxtwitter.com') + pathname, { headers: { 'user-agent': 'githito.xapi collector' }, signal: AbortSignal.timeout(20000) }); }
+    catch (e) { return null; }
+    const data = await res.json().catch(() => null);
+    /* A search that is refused answers 404 (one that finds nothing answers 200 with no results). */
+    if (pathname.startsWith('/2/search') && (res.status !== 200 || (data && data.code && data.code !== 200))) throw new Refused('search refused (' + res.status + ')');
+    return res.ok ? data : null;
+  },
+  /* People's own posts about a word that someone answered; half the searches look at yesterday or the day before. */
+  async posts(word, lang) {
+    let range = '';
+    if (Math.random() < 0.5) {
+      const d = new Date(Date.now() - (1 + Math.floor(Math.random() * 2)) * 86400e3).toISOString().slice(0, 10);
+      range = ` since:${d} until:${new Date(Date.parse(d) + 86400e3).toISOString().slice(0, 10)}`;
+    }
+    const data = await this.get('/2/search?q=' + encodeURIComponent(`${word} -filter:replies -filter:retweets min_replies:2 lang:${lang}${range}`));
+    return ((data && data.results) || []).map(st => this.record(st));
+  },
+  async replies(id) {
+    const data = await this.get('/2/conversation/' + id);
+    return ((data && data.replies) || []).map(st => this.record(st));
+  },
+};
+/* What is saved comes from X itself. The post and each reply are read again through X's official embed
+   API; one that X does not show, or whose words or writer differ from what the finder said, is dropped.
+   The talk is kept when the post and one reply at least are confirmed. */
+let differed = 0;
+let gone = 0;
+async function confirm(post, replies) {
+  const check = async m => {
+    const e = await readEmbed(m.handle, m.id);
+    if (!e) { gone++; return null; }
+    if (e.handle.toLowerCase() !== m.handle.toLowerCase() || !sameWords(e.raw, m.text)) { differed++; return null; }
+    return { ...m, handle: e.handle, text: plain(e.raw), url: 'https://x.com/' + e.handle + '/status/' + m.id };
+  };
+  const [p, ...rs] = await Promise.all([check(post), ...replies.map(check)]);
+  const kept = rs.filter(Boolean);
+  return p && kept.length ? { post: p, replies: kept } : null;
+}
 const official = {
   name: 'official',
   fields: {
@@ -125,16 +185,18 @@ async function collect(lang, genres, src) {
     });
     cands.sort((a, b) => b.z - a.z);
     let got = 0;
-    for (let i = 0; i < cands.length && got < CONF.perWord && i < 8 && read < CONF.reads; i += 4) {
+    for (let i = 0; i < cands.length && got < CONF.perWord && i < 12 && read < CONF.reads; i += 4) {
       const batch = cands.slice(i, i + 4);
       const lists2 = await Promise.all(batch.map(c => src.replies(c.post.id).catch(e => { if (e instanceof Refused) return []; throw e; })));
-      batch.forEach((c, k) => {
-        if (got >= CONF.perWord || found.length >= CONF.add) return;
-        const replies = pickReplies(c.post, lists2[k] || [], lang);
-        if (!replies.length) return;
-        have.add(c.post.id);
-        people.add(c.post.handle.toLowerCase());
-        found.push({ id: c.post.id, genre, word, found: stamp(), post: c.post, replies });
+      /* This program chooses: the replies with a punch. Then X's own words are read for the ones chosen. */
+      const chosen = batch.map((c, k) => ({ c, replies: pickReplies(c.post, lists2[k] || [], lang) })).filter(x => x.replies.length);
+      const sure = await Promise.all(chosen.map(x => (src.confirm ? confirm(x.c.post, x.replies) : { post: x.c.post, replies: x.replies })));
+      chosen.forEach((x, k) => {
+        const t = sure[k];
+        if (!t || got >= CONF.perWord || found.length >= CONF.add) return;
+        have.add(t.post.id);
+        people.add(t.post.handle.toLowerCase());
+        found.push({ id: t.post.id, genre, word, found: stamp(), post: t.post, replies: t.replies });
         got++;
       });
     }
@@ -150,21 +212,21 @@ async function collect(lang, genres, src) {
 async function main() {
   let name = CONF.source;
   if (name === 'auto') name = CONF.token ? 'official' : 'off';
-  if (name !== 'official') {
-    console.log('The source is "' + CONF.source + '", so nothing was collected and no file was changed.\nSet "source" in config.json to official and add the key X_BEARER_TOKEN. See README.md.');
+  if (name !== 'official' && name !== 'fxtwitter') {
+    console.log('The source is "' + CONF.source + '", so nothing was collected and no file was changed.\nSet "source" in config.json to fxtwitter, or to official with the key X_BEARER_TOKEN. See README.md.');
     return;
   }
-  const src = official;
-  if (!CONF.token) throw new Error('The source is official but X_BEARER_TOKEN is not set.');
+  const src = name === 'official' ? official : fx;
+  if (src === official && !CONF.token) throw new Error('The source is official but X_BEARER_TOKEN is not set.');
   const { genres } = JSON.parse(await readFile(path.join(HERE, 'words.json'), 'utf8'));
   const outs = [];
   for (const lang of (CONF.langs.length ? CONF.langs : ['ja'])) {
-    console.log(`Collecting ${lang} from X's API`);
+    console.log(`Collecting ${lang}: found by ${src.name}${src.confirm ? ', words read from X' : ''}`);
     const out = await collect(lang, genres, src);
     outs.push(out);
     if (!CONF.dry) await writeApi(CONF.out, out, genres);
   }
   if (!CONF.dry) await writeIndex(CONF.out, src.name, outs);
-  console.log(`Asked X ${asked} times; X returned ${read} posts.`);
+  console.log(src.confirm ? `Asked ${src.name} ${asked} times. Dropped: ${gone} that X does not show, ${differed} whose words differed.` : `Asked X ${asked} times; X returned ${read} posts.`);
 }
 main().catch(e => { console.error(e.message || e); process.exit(1); });

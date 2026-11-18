@@ -282,6 +282,8 @@ export const freeOf = (text, lang) => { const t = String(text || ''); return !si
    The two were not written to each other. Which sayings go together is decided here, by these
    rules, and written into the API as pairs; the page only draws from them. */
 const FACE = /[゜ﾟωДд∀´｀꒳ᐛ◍๑ᴗ╹°▽ε≧≦＞＜ꉂ𐤔]|[（(][^（()）]{1,8}[)）]|[ｦ-ﾟ]{2,}/;
+/* Rough words, and politics: a match is a friendly exchange, and nobody's saying is put beside a party's name. */
+const ROUGH = /クソ|くっそ|帰れ|うるさ|黙[れっ]|[一-龯ァ-ヶ]{1,4}党|政治|選挙|国会|首相|総理|議員|政府|大臣|知事|政権|増税|減税|法案|\b(?:shut up|damn|politic\w*|election)\b/i;
 /* A saying, judged by its words alone: short, and nothing that may not play. */
 export function sayText(text, lang) {
   const t = String(text || '').trim();
@@ -289,7 +291,7 @@ export function sayText(text, lang) {
   if (n < 2 || n > (lang === 'en' ? 60 : 30)) return false;
   if (lang === 'en' ? !/[A-Za-z]{2,}/.test(t) : !CJK.test(t)) return false;
   return cleanText(t) && !GLOOM.test(t) && !AD.test(t) && !SOLICIT.test(t) && !SCHOOL.test(t) && !BODILY.test(t)
-    && !SOMEBODY.test(t) && !SENSITIVE.test(t) && !TEASER.test(t) && !FACE.test(t);
+    && !SOMEBODY.test(t) && !SENSITIVE.test(t) && !TEASER.test(t) && !FACE.test(t) && !ROUGH.test(t);
 }
 /* A saying as the search told it (its writer's profile and numbers are known): an ordinary person's
    account, more than a year old; no hashtag, picture, link or quote. null, or the saying as it is saved. */

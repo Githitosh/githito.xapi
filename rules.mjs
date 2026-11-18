@@ -187,7 +187,7 @@ export function standsAlone(text, lang) {
 const GIRLFRIEND = '(?:俺|僕|おれ|ぼく|自分|私|うち)の彼女|彼女(?:さん)?(?:(?:が|は|も|を)?(?:でき|ほし|欲し|いな|おら|作り|つくり)|持ち|と(?:デート|付き合|同棲|別れ|会|電話|通話|遊|出かけ|旅行|ご飯|飯|過ご|行っ|行く|行き|食べ|観|見に|住|暮ら|喧嘩|仲直り)|に(?:振られ|フラれ|ふられ|会|怒られ|プレゼント|言われ|作っ|あげ|渡)|が(?:可愛|かわい|好き|作っ|くれ|怒|欲し|ほし|でき|い)|を(?:作|つく|大事|大切|幸せ|喜ば|迎え)|から|の(?:手料理|誕生日|プレゼント|家|ため))|元カノ|初彼女';
 const LOVE = {
   /* 彼女 also means "she", so it counts only where it reads as a girlfriend. */
-  ja: new RegExp('彼氏|彼ピ|' + GIRLFRIEND + '|恋人(?!達|たち)|片思い|片想い|好きな人|デート|同棲|告白(?:され|した|して|する|でき)|付き合って(?:る|た|ない|から|いる|いた|ほし|欲し|ください)|付き合(?:い始め|いたて|うことに|いたい|えた|える)|恋愛|失恋|元カレ|元彼|恋し(?:た|て)|恋バナ|遠距離恋愛|惚れ'),
+  ja: new RegExp('彼氏|彼ピ|' + GIRLFRIEND + '|恋人(?!達|たち)|片思い|片想い|好きな人|デート|同棲|告白(?:され|した|して|する|でき)|付き合って(?:る|た|ない|から|いる|いた|ほし|欲し|ください)|付き合(?:い始め|いたて|うことに|いたい|えた|える)|恋愛|失恋|元カレ|元彼|恋し(?:た|て)|恋バナ|遠距離恋愛|クリぼっち|惚れ'),
   en: /\b(?:boyfriend|girlfriend|crush|date|dating|anniversary|in love|my ex|single)\b/i,
 };
 /* Not for a matching: married life and children, cheating, and anything of the body. */
@@ -210,7 +210,7 @@ const DIALOGUE = /^\s*「[^」]*」\s*「/;
 /* Advice for sale and sweeping talk about men and women: lists, "men are…", "what women really…". */
 /* Two emoji standing for a pair of characters (同棲🦌🧱が…): talk about a fictional couple. */
 const PAIR = /\p{Extended_Pictographic}\p{Extended_Pictographic}[がはのをにと]/u;
-const LECTURE = /男って|女って|男は|女は|男の(?:勘違い|本音|特徴)|女の(?:本音|特徴)|女性[がは]|男性[がは]|モテ|脈あり|脈なし|[■◆●▼✅👇☑]|[0-9０-９]+選|そう思ってた|気づけなかった|\b(?:men are|women are|guys who|girls who)\b/i;
+const LECTURE = /男って|(?<!彼)女って|男は|(?<!彼)女は|男の(?:勘違い|本音|特徴)|女の(?:本音|特徴)|女性[がは]|男性[がは]|モテ|脈あり|脈なし|[■◆●▼✅👇☑]|[0-9０-９]+選|そう思ってた|気づけなかった|\b(?:men are|women are|guys who|girls who)\b/i;
 /* Does the text talk of love, in a life and not in a story? */
 export const loveText = (text, lang) => { const t = String(text || ''); return LOVE[lang].test(t) && !FICTION.test(t) && !SOLICIT.test(t) && !SCHOOL.test(t) && !NOT_SINGLE.test(t) && !BODILY.test(t) && !LECTURE.test(t) && !PAIR.test(t) && !DIALOGUE.test(t) && !SOMEBODY.test(t) && !SENSITIVE.test(t) && !TEASER.test(t); };
 /* The filters a post about love goes through, one after the other. The collector counts what each lets by.

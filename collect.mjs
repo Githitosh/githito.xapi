@@ -24,7 +24,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { talkPost, zest, pickReplies, stamp, readJson, writeApi, writeIndex, young, readEmbed, sameWords, plain } from './rules.mjs';
+import { talkPost, zest, pickReplies, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, sameWords, plain } from './rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -204,7 +204,7 @@ async function collect(lang, genres, src) {
     await sleep(CONF.pause);
   }
   /* New talks first, then the earlier ones that are still young; the API holds CONF.keep of them. */
-  const talks = shuffle(found).concat(old.filter(t => young(t, CONF.hours))).slice(0, CONF.keep);
+  const talks = shuffle(found).concat(old.filter(t => young(t, CONF.hours) && stillOk(t))).slice(0, CONF.keep);
   console.log(`  ${lang}: ${found.length} new talks, ${talks.length} in the API (${searches} searches)`);
   return { version: 1, lang, updated: stamp(), source: src.name, count: talks.length, talks };
 }

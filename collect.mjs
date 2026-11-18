@@ -38,7 +38,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost, loveSafe, loveFit, replySafe, sideOf, wishes, freeOf } from './rules.mjs';
+import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost, loveSafe, loveFit, replySafe, sideOf, wishes, freeOf, sayOk, sayText, pairable, pairUp, lexiconWords } from './rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -57,7 +57,10 @@ const CONF = {
   posts: num('posts', FILE.posts || 400), // posts Matching News' data holds
   lines: num('lines', FILE.lines || 300), // lines Matching News' data holds
   searches: num('searches', FILE.searches || 50), // searches of replies one run may make (about 20 replies each)
-  loveSearches: num('lovesearches', FILE.loveSearches || 50), // searches of posts about love (about 20 posts each)
+  /* Searches of posts about love (the earlier matching). 0 in config.json turns them off. */
+  loveSearches: FILE.loveSearches === 0 && !opt('lovesearches', '') ? 0 : num('lovesearches', FILE.loveSearches || 50),
+  saySearches: num('saysearches', FILE.saySearches || 50), // searches of posts for short sayings (about 20 posts each)
+  says: num('says', FILE.says || 800), // sayings Matching News' data holds
   reads: num('reads', FILE.reads || 300), // posts X may return in one run (X charges for each)
   perWord: num('perword', 6),    // talks one word may give in a run
   hours: num('hours', 48),       // a talk leaves the API after this many hours
@@ -100,6 +103,11 @@ const fx = {
     /* A search that is refused answers 404 (one that finds nothing answers 200 with no results). */
     if (res.status !== 200 || (data && data.code && data.code !== 200)) throw new Refused('search refused (' + res.status + ')');
     return ((data && data.results) || []).map(st => this.record(st));
+  },
+  /* Posts and replies alike (no reposts or links) that say the word: short sayings are mostly replies. */
+  any(word, lang) {
+    const until = Math.floor(Date.now() / 1000) - (1 + Math.floor(Math.random() * 46)) * 3600;
+    return this.ask(`${word} -filter:retweets -filter:links lang:${lang} since_time:${until - 7200} until_time:${until}`);
   },
   /* People's own posts (no replies, reposts or links) that say the word, written in two hours drawn from the last two days. */
   posts(word, lang) {
@@ -176,6 +184,57 @@ async function loveStage(lang, words, wordsShe) {
   STAGES[lang] = { ...(STAGES[lang] || {}), posts: count };
   return posts;
 }
+/* Matching News' sayings: short things people say, found by searches (of posts and replies alike) with
+   the words that pairs turn on (words.json, pairs). The same three filters: 1 and 2 are rules.mjs
+   sayOk (whose account, may it play, is it short and its own); 3 is X itself: the saying is read from
+   X's embed API and X's words are judged again. A reply is read with the post it answers, and kept
+   only when that post may be shown too, because the reply's address leads there. */
+const SAYS = {};
+async function readSay(c, lang) {
+  if (c.replyTo) {
+    if (!c.replyToHandle) return null;
+    const p = await fromX(c.replyToHandle, c.replyTo, '');
+    if (!p || !cleanText(plain(p.raw))) return null;
+  }
+  const x = await fromX(c.user.username, c.id, c.replyTo || '');
+  const say = x ? sayOk({ ...c, raw: x.raw, user: { ...c.user, username: x.user.username, name: x.user.name || c.user.name } }, lang) : null;
+  return say ? { ...say, to: c.replyTo || '' } : null;
+}
+async function sayStage(lang, lex) {
+  const says = [];
+  const list = shuffle(lexiconWords(lex));
+  const count = { gathered: 0, passed: 0, kept: 0 };
+  let searches = 0;
+  let refusals = 0;
+  for (let n = 0; !CONF.noSearch && n < CONF.saySearches && list.length; n++) {
+    const word = list[n % list.length];
+    let got;
+    try { got = await fx.any(word, lang); searches++; refusals = 0; }
+    catch (e) {
+      if (!(e instanceof Refused)) throw e;
+      if (++refusals >= CONF.patience) { console.log(`  ${e.message}: stopping with what was found`); break; }
+      console.log(`  ${e.message}: resting two minutes`);
+      await sleep(CONF.rest);
+      n--;
+      continue;
+    }
+    count.gathered += got.length;
+    const cands = got.map(p => ({ ...p, media: p.picture })).filter(p => sayOk(p, lang) && !says.some(x => x.id === p.id));
+    count.passed += cands.length;
+    let kept = 0;
+    for (let i = 0; i < cands.length; i += 4) {
+      const read4 = await Promise.all(cands.slice(i, i + 4).map(c => readSay(c, lang)));
+      read4.forEach(say => { if (say && !says.some(x => x.id === say.id)) { says.push({ ...say, found: stamp() }); kept++; } });
+    }
+    console.log(`  ${lang} saying search ${n + 1} "${word}": ${got.length} gathered, ${cands.length} pass filters 1 and 2, ${kept} pass filter 3 (${says.length} so far)`);
+    await sleep(CONF.pause);
+  }
+  count.kept = says.length;
+  console.log(`  ${lang} sayings: ${searches} searches gathered ${count.gathered} -> filters 1 and 2 (whose account, may it play, short and its own) ${count.passed} -> filter 3 (read from X, judged again) ${count.kept}.`);
+  STAGES[lang] = { ...(STAGES[lang] || {}), sayings: count };
+  SAYS[lang] = says;
+  return says;
+}
 /* The two stages. */
 async function twoStages(lang, genres, any) {
   const file = path.join(CONF.out, 'v1', `talks-${lang}.json`);
@@ -192,6 +251,8 @@ async function twoStages(lang, genres, any) {
   let passed = 0;
   let gone = 0;
   let safe1 = 0;
+  let saidGathered = 0;
+  let saidKept = 0;
   /* For Matching News: the lines this run reads from X. */
   const lines = [];
   for (let n = 0; !CONF.noSearch && n < CONF.searches && found.length < CONF.add; n++) {
@@ -224,6 +285,17 @@ async function twoStages(lang, genres, any) {
       else if (line && alone < 6) { alone++; cands.push({ parent, reply: line, talk: false, line: true }); }
     });
     passed += cands.length;
+    /* A short reply can be a saying for Matching News too: a few from each search, when it says a
+       word that pairs turn on, asks, or looks for agreement. It is read from X with the post it
+       answers, and kept when both may be shown. */
+    if (LEX[lang]) {
+      const short = list.map(r => ({ r, say: sayOk({ ...r, media: r.picture }, lang) })).filter(x => x.say && x.r.replyTo && x.r.replyToHandle && pairable(x.say.text, LEX[lang])).slice(0, 8);
+      saidGathered += short.length;
+      for (let i = 0; i < short.length; i += 4) {
+        const read4 = await Promise.all(short.slice(i, i + 4).map(({ r }) => readSay({ ...r, media: r.picture }, lang)));
+        read4.forEach(say => { if (say && !(SAYS[lang] || []).some(x => x.id === say.id)) { (SAYS[lang] = SAYS[lang] || []).push({ ...say, found: stamp() }); saidKept++; } });
+      }
+    }
     /* Then X itself is asked for the post and for the reply, and the rules judge X's own words. */
     let got = 0;
     for (let i = 0; i < cands.length && found.length < CONF.add; i += 4) {
@@ -259,7 +331,8 @@ async function twoStages(lang, genres, any) {
   const made = {};
   found.forEach(t => { made[t.genre] = (made[t.genre] || 0) + 1; });
   console.log(`  ${lang} replies: ${searches} random searches gathered ${replies} -> filter 1 (may it play, whose account) ${safe1} -> filter 2 (a reply with a punch, or a reaction of a few words) ${passed} -> filter 3 (reply and its post read from X, judged again) ${lines.length} lines, ${found.length} talks ${JSON.stringify(made)}; ${gone} were not shown by X. ${talks.length} talks in the API.`);
-  STAGES[lang] = { ...(STAGES[lang] || {}), replies: { gathered: replies, filter1: safe1, filter2: passed, filter3: { lines: lines.length, talks: found.length } } };
+  console.log(`  ${lang} sayings from replies: ${saidGathered} short replies passed filters 1 and 2 -> filter 3 (reply and its post read from X) ${saidKept}.`);
+  STAGES[lang] = { ...(STAGES[lang] || {}), replies: { gathered: replies, filter1: safe1, filter2: passed, filter3: { lines: lines.length, talks: found.length, sayings: saidKept } } };
   NEW[lang] = { posts: (NEW[lang] && NEW[lang].posts) || [], lines };
   return { version: 1, lang, updated: stamp(), source: 'fxtwitter', count: talks.length, talks };
 }
@@ -271,6 +344,8 @@ async function twoStages(lang, genres, any) {
    the page never passes a real pair off as a match, nor a match as a real pair. Posts about politics
    are left out of the matching. */
 const NEW = {};
+/* The words pairs turn on, for each language (words.json, pairs). */
+const LEX = {};
 /* What each filter let by in this run, for each language: written into the API beside the data. */
 const STAGES = {};
 async function matchOf(lang, genres, talks, source) {
@@ -301,9 +376,32 @@ async function matchOf(lang, genres, talks, source) {
   /* Earlier posts stay only when they were found as posts about love. */
   (Array.isArray(before.posts) ? before.posts : []).filter(p => fresh(p) && p.via === 'love').forEach(p => addPost(p, p.found));
   (Array.isArray(before.lines) ? before.lines : []).filter(fresh).forEach(l => addLine(l, l.found));
+  /* The sayings: this run's, and the earlier ones that are still young and still pass the rules. One
+     saying of the same words by the same person is enough. */
+  const says = [];
+  const addSay = x => {
+    if (!x || !x.id || !x.handle || !x.url || !sayText(x.text, lang)) return;
+    if (says.some(y => y.id === x.id || (y.handle.toLowerCase() === x.handle.toLowerCase() && lineKey(y.text) === lineKey(x.text)))) return;
+    says.push({ id: x.id, handle: x.handle, text: x.text, url: x.url, reply: !!x.reply, to: x.to || '', found: x.found });
+  };
+  shuffle(SAYS[lang] || []).forEach(addSay);
+  (Array.isArray(before.says) ? before.says : []).filter(fresh).forEach(addSay);
+  /* What the API already holds, read from X and judged before, is a source too: the short posts and
+     replies of the talks, and the lines. A reply keeps the post it was really written to ("to"), so
+     the two are never paired as a match. */
+  talks.filter(t => !t.manual).forEach(t => {
+    addSay({ ...t.post, found: t.found });
+    t.replies.forEach(r => addSay({ ...r, reply: true, to: t.post.id, found: t.found }));
+  });
+  lines.forEach(l => addSay({ ...l, reply: true, found: l.found }));
+  const kept = says.slice(0, CONF.says);
+  const pairs = LEX[lang] ? pairUp(kept, LEX[lang], lang) : [];
+  const kinds = {};
+  pairs.forEach(p => { kinds[p.kind] = (kinds[p.kind] || 0) + 1; });
+  console.log(`  ${lang} matching: ${kept.length} sayings make ${pairs.length} pairs ${JSON.stringify(kinds)}.`);
   /* A run that searched nothing keeps the counts of the last run that did. */
   const stages = CONF.noSearch || !STAGES[lang] ? (before.stages || null) : { at: stamp(), ...STAGES[lang] };
-  const out = { version: 1, lang, updated: stamp(), source, stages, posts: posts.slice(0, CONF.posts), lines: lines.slice(0, CONF.lines).map(({ key, ...l }) => l) };
+  const out = { version: 2, lang, updated: stamp(), source, stages, says: kept, pairs, posts: posts.slice(0, CONF.posts), lines: lines.slice(0, CONF.lines).map(({ key, ...l }) => l) };
   const sides = k => out.posts.filter(p => p.side === k).length;
   console.log(`  ${lang} matching: ${out.posts.length} posts (${sides('boyfriend')} speak of a boyfriend, ${sides('girlfriend')} of a girlfriend, ${sides('')} of neither; ${out.posts.filter(p => p.wish).length} wish for one; ${out.posts.filter(p => p.free).length} are free to be matched) and ${out.lines.length} lines.`);
   return out;
@@ -412,12 +510,14 @@ async function main() {
   }
   const src = name === 'official' ? official : fx;
   if (src === official && !CONF.token) throw new Error('The source is official but X_BEARER_TOKEN is not set.');
-  const { genres, any, match: loveWords, matchShe: sheWords } = JSON.parse(await readFile(path.join(HERE, 'words.json'), 'utf8'));
+  const { genres, any, match: loveWords, matchShe: sheWords, pairs: pairWords } = JSON.parse(await readFile(path.join(HERE, 'words.json'), 'utf8'));
   const outs = [];
   const matches = [];
   for (const lang of (CONF.langs.length ? CONF.langs : ['ja'])) {
     console.log(src === fx ? `Collecting ${lang}: searches, this program's filter, words read from X` : `Collecting ${lang} from X's API`);
-    if (src === fx) NEW[lang] = { posts: await loveStage(lang, (loveWords && loveWords[lang]) || [], (sheWords && sheWords[lang]) || []), lines: [] };
+    LEX[lang] = (pairWords && pairWords[lang]) || null;
+    if (src === fx && LEX[lang]) await sayStage(lang, LEX[lang]);
+    if (src === fx) NEW[lang] = { posts: CONF.loveSearches ? await loveStage(lang, (loveWords && loveWords[lang]) || [], (sheWords && sheWords[lang]) || []) : [], lines: [] };
     const out = src === fx ? await twoStages(lang, genres, (any && any[lang]) || []) : await collect(lang, genres, src);
     outs.push(out);
     const match = await matchOf(lang, genres, out.talks, src.name);

@@ -133,7 +133,7 @@ export function lineOf(text, lang) {
   if (n < 2 || n > (lang === 'en' ? 48 : 24) || THANKS.test(t) || CALLED.test(t) || ANSWERS.test(t)) return null;
   if (lang === 'en' ? !/[A-Za-z]{2,}/.test(t) : !CJK.test(t)) return null;
   /* A face drawn with letters ((゜ロ゜), ( ´∀｀)) breaks apart when the line is shown large. */
-  if (/[゜ﾟωДд∀´｀꒳ᐛ◍๑ᴗ╹°▽ε≧≦＞＜ꉂ𐤔]|[（(][^（()）]{1,8}[)）]/.test(t)) return null;
+  if (FACE.test(t)) return null;
   if (!isFunny(t, lang) && !QUIP[lang].test(t) && !CUE[lang].test(t)) return null;
   const bare = t.replace(/\p{Extended_Pictographic}|️|‍/gu, ' ');
   const needs = [];
@@ -273,6 +273,117 @@ const GONE = { ja: /元カレ|元カノ|元彼|別れ(?:た(?!く)|て(?!ほし|
 /* "My boyfriend now", beside talk of an ex: the writer is not free. */
 const NOW = { ja: /今の(?:彼氏|彼女|恋人)|今彼|今カレ|今カノ|初彼女|初彼氏/, en: /\bmy (?:new|current) (?:boyfriend|girlfriend)\b/i };
 export const freeOf = (text, lang) => { const t = String(text || ''); return !sideOf(t, lang) || wishes(t, lang) || (GONE[lang].test(t) && !NOW[lang].test(t)); };
+/* ---------- matching: two short sayings that answer one another ---------- */
+/* Matching News shows two short things, said by two people, as an exchange:
+     かわいい ー かっこいい            a word and the word that answers it (words.json, pairs.echo)
+     大阪万博いつ始まるの？ ー 博多万博の後   a question, and a short saying with the same word in it
+     ディズニーランドと間違えた ー 今USJ    two words of one family (pairs.kin)
+     いい天気だな ー そうだね           a short remark, and a word of agreement (pairs.agree)
+   The two were not written to each other. Which sayings go together is decided here, by these
+   rules, and written into the API as pairs; the page only draws from them. */
+const FACE = /[゜ﾟωДд∀´｀꒳ᐛ◍๑ᴗ╹°▽ε≧≦＞＜ꉂ𐤔]|[（(][^（()）]{1,8}[)）]|[ｦ-ﾟ]{2,}/;
+/* A saying, judged by its words alone: short, and nothing that may not play. */
+export function sayText(text, lang) {
+  const t = String(text || '').trim();
+  const n = charLen(t);
+  if (n < 2 || n > (lang === 'en' ? 60 : 30)) return false;
+  if (lang === 'en' ? !/[A-Za-z]{2,}/.test(t) : !CJK.test(t)) return false;
+  return cleanText(t) && !GLOOM.test(t) && !AD.test(t) && !SOLICIT.test(t) && !SCHOOL.test(t) && !BODILY.test(t)
+    && !SOMEBODY.test(t) && !SENSITIVE.test(t) && !TEASER.test(t) && !FACE.test(t);
+}
+/* A saying as the search told it (its writer's profile and numbers are known): an ordinary person's
+   account, more than a year old; no hashtag, picture, link or quote. null, or the saying as it is saved. */
+export function sayOk(p, lang) {
+  const u = p && p.user;
+  if (!p || !p.id || !u || !personal(u) || minor(u) || p.quote || p.repost || p.sensitive || p.media) return null;
+  if (/[#＃]|https?:\/\//.test(p.raw) || /^\s*(?:@\w+\s+)*[>＞]/.test(p.raw)) return null;
+  if (SHADY_BIO.test(String(u.description || '') + ' ' + String(u.name || '')) || SCHOOL.test(String(u.description || ''))) return null;
+  const days = (Date.now() - Date.parse(u.joined || 0)) / 86400e3;
+  if (!(days > 365) || !(u.statuses >= 300) || !(u.followers >= 30) || u.followers > 50000) return null;
+  const text = plain(p.raw);
+  if (!sayText(text, lang)) return null;
+  return { id: p.id, handle: u.username, text, url: 'https://x.com/' + u.username + '/status/' + p.id, reply: !!p.replyTo };
+}
+/* What a saying is about: its words in kanji, katakana or Latin letters, without the words every saying has. */
+const PLAIN_WORDS = new Set(('今日 昨日 明日 今年 去年 来年 今月 来月 最近 自分 一緒 本当 時間 普通 人生 最高 大事 予定 毎日 一番 今回 今度 大好 好き 気持 結局 全部 絶対 最初 最後 '
+  + '一人 二人 人間 意味 感じ 相手 場所 生活 理由 自体 以上 以外 以前 全然 多分 何故 無理 必要 大丈夫 可愛 実感 仕事 今週 来週 先週 今夜 今朝 午前 午後 時間 一日 一回 何回 何時 何度 何処 全員').split(' '));
+/* A long word in kanji is often two words (大阪万博): its first two and its last two letters count too.
+   Laughs, reaction words and the stems of everyday verbs are not what a saying is about. */
+const STEMS = new Set('頑張 素晴 美味 面白 大変 最悪 最高 可愛 綺麗 大好 楽 嬉 悲 笑笑 何食 一緒 本当 今日 明日 昨日'.split(' '));
+export const keywordsOf = text => {
+  const out = [];
+  (String(text || '').match(/[一-龯々〆ヶ]{2,}|[ァ-ヴー]{3,}|[A-Za-z]{3,}/g) || []).forEach(w => {
+    const k = w.replace(/^ー+|ー+$/g, '');
+    if (charLen(k) < 2 || /^[wWｗＷ]+$/.test(k) || /^[笑草]+$/.test(k)) return;
+    out.push(k.toLowerCase());
+    if (/^[一-龯々〆ヶ]{4,}$/.test(k)) out.push(k.slice(0, 2), k.slice(-2));
+  });
+  return [...new Set(out)].filter(w => !PLAIN_WORDS.has(w) && !STEMS.has(w) && !REACT.has(w) && !REACT.has(w.toUpperCase()));
+};
+const coreOf = text => String(text || '').replace(/\p{Extended_Pictographic}|️|‍/gu, '').replace(/笑+|草+|[wWｗＷ]+|[\s　、。，．,.!?！？…・〜～ー\-⁉‼()（）「」]+/g, '');
+/* Does the saying say one of the words? The word it says, or ''. */
+const saysWord = (t, w) => { const k = String(w).toLowerCase(); return /^[一-龯]$/.test(k) ? new RegExp('(?<![一-龯])' + k + '(?![一-龯])').test(t) : t.includes(k); };
+const saysOne = (t, list) => (list || []).find(w => saysWord(t, w)) || '';
+/* A lexicon's every word, for the collector: sayings worth reading say one of them, ask, or agree. */
+export const lexiconWords = lex => [...new Set([].concat(...(lex.echo || []).map(e => e[0].concat(e[1])), ...(lex.kin || []), lex.agree || [], lex.seed || []))];
+export function pairable(text, lex) {
+  const t = String(text || '').toLowerCase();
+  return asks(text) || !!saysOne(t, lexiconWords(lex)) || /[なねわよ][ぁあー〜]*$/.test(coreOf(text));
+}
+/* The pairs: which saying may open and which may answer. items: sayings; lex: words.json's pairs for the
+   language. Each pair is { a, b, kind, word }: the ids of the opening and the answering saying, the
+   rule that made it, and the word they turn on. Two sayings of one person are never paired. */
+export function pairUp(items, lex, lang) {
+  const out = [];
+  const seen = new Set();
+  const uses = new Map();
+  const mix = list => list.map(x => [Math.random(), x]).sort((a, b) => a[0] - b[0]).map(x => x[1]);
+  const T = items.map(x => ({ x, t: x.text.toLowerCase(), n: charLen(x.text), q: asks(x.text), core: coreOf(x.text) }));
+  const add = (a, b, kind, word) => {
+    if (a.x.id === b.x.id || a.x.handle.toLowerCase() === b.x.handle.toLowerCase()) return false;
+    /* A reply and the post it was really written to are a real talk, not a match. */
+    if ((a.x.to && a.x.to === b.x.id) || (b.x.to && b.x.to === a.x.id)) return false;
+    const k = a.x.id + '|' + b.x.id;
+    if (seen.has(k) || seen.has(b.x.id + '|' + a.x.id)) return false;
+    /* One saying is not used in more than six pairs, so the videos do not turn on the same few. */
+    if ((uses.get(a.x.id) || 0) >= 6 || (uses.get(b.x.id) || 0) >= 6) return false;
+    seen.add(k);
+    uses.set(a.x.id, (uses.get(a.x.id) || 0) + 1);
+    uses.set(b.x.id, (uses.get(b.x.id) || 0) + 1);
+    out.push({ a: a.x.id, b: b.x.id, kind, word });
+    return true;
+  };
+  /* turn: the longer saying opens and the shorter one answers (for rules that have no order of their own). */
+  const cross = (A, B, kind, word, cap, turn) => {
+    let n = 0;
+    for (const a of mix(A)) { for (const b of mix(B)) { if (n >= cap) return; if (turn && b.n > a.n ? add(b, a, kind, word) : add(a, b, kind, word)) { n++; break; } } }
+  };
+  const short = (i, max) => !i.q && i.n <= max;
+  /* 1. A word and the word that answers it. The word is most of what each one says. */
+  const mostly = (i, list) => { const w = short(i, 16) ? saysOne(i.t, list) : ''; return !!w && i.core.length <= charLen(w) + 6; };
+  (lex.echo || []).forEach(([L, R]) => cross(T.filter(i => mostly(i, L)), T.filter(i => mostly(i, R)), 'echo', L[0], 10));
+  /* 2. A question, and a short saying that has one of the question's words in it. */
+  T.filter(i => i.q && i.n <= 24).forEach(i => {
+    keywordsOf(i.x.text).forEach(K => cross([i], T.filter(j => short(j, 16) && j.t.includes(K)), 'ask', K, 2));
+  });
+  /* 3. Two words of one family (Disneyland and USJ, Osaka and Hakata). */
+  (lex.kin || []).forEach(group => {
+    const by = group.map(w => [w, T.filter(i => short(i, 18) && saysWord(i.t, w))]).filter(x => x[1].length);
+    let n = 0;
+    mix(by).forEach(([w, A]) => mix(by).forEach(([v, B]) => { if (w !== v && n < 10) { const before = out.length; cross(A, B, 'kin', w, 2, true); n += out.length - before; } }));
+  });
+  /* 4. Two sayings with the same word in them. */
+  const byWord = new Map();
+  T.filter(i => short(i, 18)).forEach(i => keywordsOf(i.x.text).forEach(K => { if (!byWord.has(K)) byWord.set(K, []); byWord.get(K).push(i); }));
+  byWord.forEach((list, K) => { if (list.length > 1) cross(list, list, 'same', K, 1, true); });
+  /* 5. A short remark that looks for agreement, and a word of agreement. */
+  const agree = T.filter(i => (lex.agree || []).some(w => i.core === w || (i.core.startsWith(w) && i.core.length <= charLen(w) + 2)));
+  const remark = T.filter(i => short(i, 16) && i.n >= 4 && !agree.includes(i) && /[なねわよ][ぁあー〜]*$/.test(i.core));
+  /* A remark that was a post of its own reads best; a reply's remark may hang on what it answered. */
+  cross(remark.filter(i => !i.x.reply), agree, 'agree', '', 40);
+  cross(remark.filter(i => i.x.reply), agree, 'agree', '', 16);
+  return out.slice(0, 1200);
+}
 /* A post that asks something. */
 export const asks = text => /[？?][\s\p{Extended_Pictographic}️]*$/u.test(String(text || '').trim());
 /* The same line, whatever its marks: one is enough. */
@@ -353,7 +464,7 @@ export async function writeIndex(outDir, source, outs, matches) {
     out.talks.forEach(t => { genres[t.genre] = (genres[t.genre] || 0) + 1; });
     langs[out.lang] = { ...(langs[out.lang] || {}), updated: out.updated, count: out.talks.length, genres };
   });
-  (matches || []).forEach(m => { langs[m.lang] = { ...(langs[m.lang] || {}), match: { posts: m.posts.length, boyfriend: m.posts.filter(p => p.side === 'boyfriend').length, girlfriend: m.posts.filter(p => p.side === 'girlfriend').length, free: m.posts.filter(p => p.free).length, lines: m.lines.length }, stages: m.stages || null }; });
+  (matches || []).forEach(m => { langs[m.lang] = { ...(langs[m.lang] || {}), match: { posts: m.posts.length, boyfriend: m.posts.filter(p => p.side === 'boyfriend').length, girlfriend: m.posts.filter(p => p.side === 'girlfriend').length, free: m.posts.filter(p => p.free).length, lines: m.lines.length, sayings: (m.says || []).length, pairs: (m.pairs || []).length }, stages: m.stages || null }; });
   await writeFile(path.join(outDir, 'v1', 'index.json'), JSON.stringify({ version: 1, updated: stamp(), source, langs }, null, 1) + '\n');
   await writeFile(path.join(outDir, '.changed'), stamp() + '\n');
 }

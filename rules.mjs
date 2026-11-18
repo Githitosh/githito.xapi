@@ -8,7 +8,7 @@ export async function readJson(file, empty) { try { return JSON.parse(await read
 /* ---------- what may play ---------- */
 const VIOLENT = /murder|stabbed|shot dead|shooting|killed|beheading|homicide|massacre|rape|sexual assault|robbery|凶悪|殺人|殺害|刺殺|遺体|刺され|死傷|銃乱射|暴行|強盗|レイプ|強姦/i;
 const HEAVY = /(?:^|[^必])死(?!ぬほど|ぬかと|んだ笑)|亡くな|遺体|事故|災害|震災|地震|津波|火災|病気|闘病|入院|がん(?!ば|が)|癌|自殺|自死|心中|いじめ|虐待|差別|ご冥福|追悼|\\brest in peace\\b|\\bRIP\\b|\bdied\b|\bdeath\b|\bcrash\b|\bdisaster\b|\bcancer\b|\bsuicide\b|\bbull(?:y|ied|ying)\b|\bracis/i;
-const SUGGESTIVE = /🔞|🍆|🍑|😏|💋|👅|いやらし|やらしい|寝かさない|抱いて|抱かれ|夜這い|ベッドで|一緒にお風呂|色っぽ|セクシー|えちえち|\bsexy\b|\bspicy\b|\bnaughty\b|\bin bed\b|(?<!ア)マゾ(?!ン)|ドM|ドＭ|ドS|ドＳ|変態|ヘンタイ|\bkink|赤ちゃんプレイ|[SＳMＭ]プレイ/i;
+const SUGGESTIVE = /🔞|🍆|🍑|😏|💋|👅|いやらし|やらしい|スケベ|すけべ|ｽｹﾍﾞ|助平|指で広げ|寝かさない|抱いて|抱かれ|夜這い|ベッドで|一緒にお風呂|色っぽ|セクシー|えちえち|\bsexy\b|\bspicy\b|\bnaughty\b|\bin bed\b|(?<!ア)マゾ(?!ン)|ドM|ドＭ|ドS|ドＳ|変態|ヘンタイ|\bkink|赤ちゃんプレイ|[SＳMＭ]プレイ/i;
 const ADULT = /騎乗位|(?<![ァ-ヴー])イ(?:ク|[っッ][たてち])(?![ァ-ヴー])|挿入|喘[ぎいぐ]|性行為|絶頂|愛撫|前戯|フェラ|クンニ|素股|精子|精液|ゴム(?:なし|無し)|アナル|潮吹|ピストン|膣|陰部|性器|夜の営み|ワンナイ|㊙|セックス|エッチ|えっち|ｴｯﾁ|エロ|下ネタ|ヤる|ヤれ|体位|下着|裸|おっぱい|乳首|ちんこ|ちんちん|まんこ|射精|中出し|勃起|ムラムラ|性欲|童貞|処女|ラブホ|\bsex|nsfw|nude|naked|horny|kinky/i;
 const NEVER = /ヤリモク|風俗|パパ活|ママ活|援交|AV女優|アダルト|porn|onlyfans|中学|小学|ＪＫ|ＪＣ|ＪＳ|\bJ[KCS]\b|高校生|女子高生|男子高生|未成年|ロリ|ショタ|\bteen|high school|middle school|underage|\bloli|\bshota|ＤＶ|\bDV\b|モラハラ|殴られ|abuse|レイプ|強姦|無理やり|盗撮|痴漢/i;
 const UNSAFE = new RegExp(ADULT.source + '|' + NEVER.source, 'i');

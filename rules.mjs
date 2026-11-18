@@ -7,7 +7,7 @@ export async function readJson(file, empty) { try { return JSON.parse(await read
 
 /* ---------- what may play ---------- */
 const VIOLENT = /murder|stabbed|shot dead|shooting|killed|beheading|homicide|massacre|rape|sexual assault|robbery|凶悪|殺人|殺害|刺殺|遺体|刺され|死傷|銃乱射|暴行|強盗|レイプ|強姦/i;
-const HEAVY = /(?:^|[^必])死(?!ぬほど|ぬかと|んだ笑)|亡くな|遺体|事故|災害|震災|地震|津波|火災|病気|闘病|入院|がん(?!ば|が)|癌|自殺|自死|心中|いじめ|虐待|差別|ご冥福|追悼|\\brest in peace\\b|\\bRIP\\b|\bdied\b|\bdeath\b|\bcrash\b|\bdisaster\b|\bcancer\b|\bsuicide\b|\bbull(?:y|ied|ying)\b|\bracis/i;
+const HEAVY = /(?:^|[^必])死(?!ぬほど|ぬかと|んだ笑)|亡くな|遺体|事故|災害|震災|地震|津波|火災|病気|闘病|入院|がん(?!ば|が)|癌|自殺|自死|心中|しにたい|消えたい|タヒ|[（(]しね[)）]|氏ね|いじめ|虐待|差別|ご冥福|追悼|\brest in peace\b|\bRIP\b|\bdied\b|\bdeath\b|\bcrash\b|\bdisaster\b|\bcancer\b|\bsuicide\b|\bbull(?:y|ied|ying)\b|\bracis/i;
 const SUGGESTIVE = /🔞|🍆|🍑|😏|💋|👅|いやらし|やらしい|スケベ|すけべ|ｽｹﾍﾞ|助平|指で広げ|寝かさない|抱いて|抱かれ|夜這い|ベッドで|一緒にお風呂|色っぽ|セクシー|えちえち|\bsexy\b|\bspicy\b|\bnaughty\b|\bin bed\b|(?<!ア)マゾ(?!ン)|ドM|ドＭ|ドS|ドＳ|変態|ヘンタイ|\bkink|赤ちゃんプレイ|[SＳMＭ]プレイ/i;
 const ADULT = /騎乗位|(?<![ァ-ヴー])イ(?:ク|[っッ][たてち])(?![ァ-ヴー])|挿入|喘[ぎいぐ]|性行為|絶頂|愛撫|前戯|フェラ|クンニ|素股|精子|精液|ゴム(?:なし|無し)|アナル|潮吹|ピストン|膣|陰部|性器|夜の営み|ワンナイ|㊙|セックス|エッチ|えっち|ｴｯﾁ|エロ|下ネタ|ヤる|ヤれ|体位|下着|裸|おっぱい|乳首|ちんこ|ちんちん|まんこ|射精|中出し|勃起|ムラムラ|性欲|童貞|処女|ラブホ|\bsex|nsfw|nude|naked|horny|kinky/i;
 const NEVER = /ヤリモク|風俗|パパ活|ママ活|援交|AV女優|アダルト|porn|onlyfans|中学|小学|ＪＫ|ＪＣ|ＪＳ|\bJ[KCS]\b|高校生|女子高生|男子高生|未成年|ロリ|ショタ|\bteen|high school|middle school|underage|\bloli|\bshota|ＤＶ|\bDV\b|モラハラ|殴られ|abuse|レイプ|強姦|無理やり|盗撮|痴漢/i;
@@ -185,24 +185,32 @@ export function standsAlone(text, lang) {
    - nothing in the post or the profile points at school age (SCHOOL), beside the rules for minors above. */
 const LOVE = {
   /* 彼女 also means "she", so it counts only where it reads as a girlfriend. */
-  ja: /彼氏|(?:俺|僕|おれ|ぼく|自分|私|うち)の彼女|彼女(?:でき|ほし|欲し|いな|おら|持ち|と(?:デート|付き合|同棲|別れ|会|電話|遊|出かけ|旅行|ご飯|飯)|に(?:振られ|フラれ|ふられ|会|怒られ|プレゼント|言われ)|が(?:可愛|かわい|好き|作っ|くれ|怒|欲し|ほし|でき|い)|から|の(?:手料理|誕生日|プレゼント|家))|恋人(?!達|たち)|片思い|片想い|好きな人|デート|同棲|告白(?:され|した|して|する|でき)|付き合って(?:る|た|ない|から|いる|いた|くれ|ほし|欲し|ください)|付き合(?:い始め|いたて|うことに|いたい|えた|える)|恋愛|失恋|元カレ|元カノ|元彼|恋し(?:た|て)|恋バナ|遠距離恋愛|惚れ/,
+  ja: /彼氏|(?:俺|僕|おれ|ぼく|自分|私|うち)の彼女|彼女(?:でき|ほし|欲し|いな|おら|持ち|と(?:デート|付き合|同棲|別れ|会|電話|遊|出かけ|旅行|ご飯|飯)|に(?:振られ|フラれ|ふられ|会|怒られ|プレゼント|言われ)|が(?:可愛|かわい|好き|作っ|くれ|怒|欲し|ほし|でき|い)|から|の(?:手料理|誕生日|プレゼント|家))|恋人(?!達|たち)|片思い|片想い|好きな人|デート|同棲|告白(?:され|した|して|する|でき)|付き合って(?:る|た|ない|から|いる|いた|ほし|欲し|ください)|付き合(?:い始め|いたて|うことに|いたい|えた|える)|恋愛|失恋|元カレ|元カノ|元彼|恋し(?:た|て)|恋バナ|遠距離恋愛|惚れ/,
   en: /\b(?:boyfriend|girlfriend|crush|date|dating|anniversary|in love|my ex|single)\b/i,
 };
 /* Not for a matching: married life and children, cheating, and anything of the body. */
 const NOT_SINGLE = /子持ち|家庭|旦那|嫁|夫|妻|結婚|既婚|子供|子ども|こども|息子|娘|長女|次女|三女|長男|次男|三男|出産|妊娠|妊っ|産院|育児|ママ|パパ|離婚|不倫|浮気|\b(?:husband|wife|married|marriage|kids?|pregnan\w+|divorce\w*|cheat\w*|affair)\b/i;
-const BODILY = /身体|カラダ|疼|触れられ|触られ|感覚を思い出|火照|濡れ|敏感|欲求|欲しがる|興奮|舐め|揉[まみむ]|肌|唇|首筋|耳元|吐息|抱きしめ|抱い[てた]|押し倒|襲[わっ]|我慢でき|夜になると|おじさん|車の中|ベッド|布団|風呂|シャワー|セクハラ|性的|ぎゅー|ぎゅっ|若い女|若い男|近親|下心|ワンナイト|お持ち帰り|体目的|体の関係|ホテル|泊ま|お泊|キス|ハグ|イチャ|いちゃ|添い寝|脱[がぎぐい]|胸|尻|フェチ|\b(?:kiss\w*|hook ?up|one night|hotel|bed)\b/i;
-const FICTION = /作品|彼氏面|彼女面|トモコレ|曲|ソング|歌詞|歌っ|新譜|アルバム|\\bMV\\b|主人公|ラブコメ|コント|両片思い|両片想い|BSS|[←→]|様|弊|周年|コス|衣装|ビジュ|社長|界隈|供給|尊い|さにわ|審神者|てぇてぇ|解釈|腐|夢見|プリン|ばつ丸|サンリオ|キャラ|ＣＰ|\bCP\b|カプ|推し|二次創作|夢小説|夢主|夢女|受け|攻め|原作|アニメ|漫画|マンガ|ドラマ|映画|小説|ゲーム|配信|ライブ|アイドル|声優|俳優|女優|芸能|タレント|熱愛|メンバー|担当|ファン|イベント|ガチャ|実装|公式|妄想|設定|\b(?:ship|fanfic|anime|manga|character|episode|season|drama|movie|idol|fandom)\b/i;
+const BODILY = /第二ラウンド|ラウンド|経験人数|NTR|NTり|ＮＴＲ|寝取|女体|男体|ホスト|キャバ|クソ客|[^お]客|身体|カラダ|疼|触れられ|触られ|感覚を思い出|火照|濡れ|敏感|欲求|欲しがる|興奮|舐め|揉[まみむ]|肌|唇|首筋|耳元|吐息|抱きしめ|抱い[てた]|押し倒|襲[わっ]|我慢でき|夜になると|おじさん|車の中|ベッド|布団|風呂|シャワー|セクハラ|性的|ぎゅー|ぎゅっ|若い女|若い男|近親|下心|ワンナイト|お持ち帰り|体目的|体の関係|ホテル|泊ま|お泊|キス|ハグ|イチャ|いちゃ|添い寝|脱[がぎぐい]|胸|尻|フェチ|\b(?:kiss\w*|hook ?up|one night|hotel|bed)\b/i;
+const FICTION = /描[かきくけこい]|物語|エピ|[0-9０-９]+話|読ませ|シーモア|\bMOD\b|敵|ＶＴ|\bVT\b|経験値|\bIEI\b|MBTI|㌧|[ｦ-ﾟ]{2,}|作品|彼氏面|彼女面|トモコレ|曲|ソング|歌詞|歌っ|新譜|アルバム|\bMV\b|主人公|ラブコメ|コント|両片思い|両片想い|BSS|[←→]|様|弊|周年|コス|衣装|ビジュ|社長|界隈|供給|尊い|さにわ|審神者|てぇてぇ|解釈|腐|夢見|プリン|ばつ丸|サンリオ|キャラ|ＣＰ|\bCP\b|カプ|推し|二次創作|夢小説|夢主|夢女|受け|攻め|原作|アニメ|漫画|マンガ|ドラマ|映画|小説|ゲーム|配信|ライブ|アイドル|声優|俳優|女優|芸能|タレント|熱愛|メンバー|担当|ファン|イベント|ガチャ|実装|公式|妄想|設定|\b(?:ship|fanfic|anime|manga|character|episode|season|drama|movie|idol|fandom)\b/i;
 const SOLICIT = /募集|希望|誘っ|彼氏なし|彼女なし|恋人なし|フリーです|[^\s]\/[^\s]+\/|会える|会いたい人|会ってくれる|住み|近くの人|あたりの人|近い人|裏垢|サブ垢|別垢|鍵垢|セフ|せふ|ＤＭ|\bDM\b|LINE|ライン|カカオ|通話|フォロ|繋がり|つながり|いいね|RT|リポスト|プロフ|固ツイ|固定|保存して|\b(?:dm me|hmu|follow|link in bio|looking for)\b/i;
 const SHADY_BIO = /→\s*[@＠]|サブ|裏垢|別垢|過激|承認|会える|募集|希望|限定|\bDM\b|ＤＭ|LINE|出会い|パパ|ママ活|せふ|セフ|副業|稼|投資|占い|鑑定|相談|カウンセ|コーチ|講座|公式|アフィ|\bPR\b|婚活|恋愛(?:相談|コーチ|コンサル|アドバイ)|モテ|垢|\b(?:onlyfans|dating coach|dm for|18\+)\b/i;
 const SCHOOL = /ハイスクール|学生|修学旅行|学校|高校|中学|小学|大学[1１一]年|部活|先生|クラス|授業|テスト|受験|放課後|制服|担任|学年|[LSF]?JK|\bDK\b|\bJC\b|\b(?:school|class|teacher|homework|grade)\b/i;
+/* Somebody named: a post about a particular person (a friend, a streamer, a character) is not the
+   writer's own talk of love, and a stranger's reaction beside it would be about that person.
+   さん, ちゃん and くん count after a name, not in たくさん, ちゃんと, 彼氏くん, お兄さん. */
+const SOMEBODY = /(?<!彼氏|彼女|お兄|お姉|兄|姉|店員|社員|皆|みな|お客|お母|お父|母|父|おば|おじ|お嬢|奥|旦那|息子|娘|看護師|お医者|運転手|業者|たく|[0-9０-９])さん(?!ざん|ぽ|ま[^し]|すう)|(?<!彼氏|彼女|赤|お兄|お姉|兄|姉|おじい|おばあ|お嬢|坊)ちゃん(?!と|ぽん)|(?<!彼氏|彼女|[くク])くん(?!くん|せい)|[一-龯ぁ-んァ-ヶA-Za-z]様|知り合い|バツ[0-9０-９一二三イチニ]/u;
+/* What is too personal to be put beside a stranger's reaction: who one is drawn to, and the state of one's mind. */
+const SENSITIVE = /ゲイ|レズ|バイセク|LGBT|ホモ|同性|障害|依存|メンヘラ|鬱|うつ病|病み|病ん|\b(?:gay|lesbian|bisexual|depress\w+|disorder)\b/i;
+/* The start of a thread that goes on elsewhere. */
+const TEASER = /続き|[↓⬇👇]|→$/u;
 /* Lines of a story: it opens with speech in brackets, answered by more speech. */
 const DIALOGUE = /^\s*「[^」]*」\s*「/;
 /* Advice for sale and sweeping talk about men and women: lists, "men are…", "what women really…". */
 /* Two emoji standing for a pair of characters (同棲🦌🧱が…): talk about a fictional couple. */
 const PAIR = /\p{Extended_Pictographic}\p{Extended_Pictographic}[がはのをにと]/u;
-const LECTURE = /男って|女って|男は|女は|男の(?:勘違い|本音|特徴)|女の(?:本音|特徴)|女性[がは]|男性[がは]|モテ|脈あり|脈なし|[■◆●▼✅👇☑]|[0-9０-９]+選|そう思ってた|気づけなかった|\\b(?:men are|women are|guys who|girls who)\\b/i;
+const LECTURE = /男って|女って|男は|女は|男の(?:勘違い|本音|特徴)|女の(?:本音|特徴)|女性[がは]|男性[がは]|モテ|脈あり|脈なし|[■◆●▼✅👇☑]|[0-9０-９]+選|そう思ってた|気づけなかった|\b(?:men are|women are|guys who|girls who)\b/i;
 /* Does the text talk of love, in a life and not in a story? */
-export const loveText = (text, lang) => { const t = String(text || ''); return LOVE[lang].test(t) && !FICTION.test(t) && !SOLICIT.test(t) && !SCHOOL.test(t) && !NOT_SINGLE.test(t) && !BODILY.test(t) && !LECTURE.test(t) && !PAIR.test(t) && !DIALOGUE.test(t); };
+export const loveText = (text, lang) => { const t = String(text || ''); return LOVE[lang].test(t) && !FICTION.test(t) && !SOLICIT.test(t) && !SCHOOL.test(t) && !NOT_SINGLE.test(t) && !BODILY.test(t) && !LECTURE.test(t) && !PAIR.test(t) && !DIALOGUE.test(t) && !SOMEBODY.test(t) && !SENSITIVE.test(t) && !TEASER.test(t); };
 /* The filters a post about love goes through, one after the other. The collector counts what each lets by.
    Filter 1, loveSafe: may it play at all, and is it an ordinary person's account? What may never play
      (rules above), no hashtag, no picture, nothing of the body, no invitation, nothing pointing at

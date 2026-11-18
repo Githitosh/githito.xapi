@@ -12,10 +12,15 @@
      node collect.mjs --dry           print the counts, write nothing
 
    How the posts are found is set in config.json ("source"), or by XAPI_SOURCE:
-     fxtwitter  api.fxtwitter.com is asked which posts there are, with this program's own words
-                (words.json). It only finds: which posts become talks is decided here (rules.mjs), and
-                the words and the writer of every post kept are read again from X's official embed API
-                (publish.x.com). A post whose words differ from what X itself shows is dropped.
+     fxtwitter  Two stages, so that the unofficial service is asked as little as possible and cannot
+                steer what a genre shows:
+                1. Searches of replies with everyday words that belong to no genre (words.json,
+                   "any"), each over two hours drawn at random. That is all api.fxtwitter.com is
+                   asked; it is not told which genres are wanted.
+                2. This program filters what came back (rules.mjs), reads the reply and the post it
+                   answers from X's official embed API (publish.x.com), keeps X's own words, and
+                   sorts the talks into genres by what they say. The post a reply answers may
+                   itself be part of a longer talk, and many talks belong to no genre ("other").
      official   X's own API (v2, recent search). Needs the key X_BEARER_TOKEN; X charges for every post
                 it returns, so a run stops at a number of posts ("reads" in config.json).
      auto       official when the key is set, otherwise off.
@@ -24,7 +29,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { talkPost, zest, pickReplies, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, sameWords, plain } from './rules.mjs';
+import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf } from './rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -40,11 +45,11 @@ const CONF = {
   out: path.resolve(opt('out', path.join(HERE, 'public'))),
   add: num('add', FILE.add || 170),    // new talks wanted from one run
   keep: num('keep', FILE.keep || 500), // talks the API holds
-  searches: num('searches', 60), // searches one run may make
+  searches: num('searches', FILE.searches || 60), // searches one run may make
   reads: num('reads', FILE.reads || 300), // posts X may return in one run (X charges for each)
   perWord: num('perword', 6),    // talks one word may give in a run
   hours: num('hours', 48),       // a talk leaves the API after this many hours
-  pause: num('pause', 4000),     // milliseconds between two searches
+  pause: num('pause', 6000),     // milliseconds between two searches
   dry: flag('dry'),
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -55,62 +60,116 @@ let asked = 0;
 let read = 0;
 class Refused extends Error {}
 const iso = v => { const t = Date.parse(v); return Number.isFinite(t) ? new Date(t).toISOString().replace(/\.\d+Z$/, 'Z') : ''; };
-/* api.fxtwitter.com: asked only which posts there are (a search with this program's words, and the replies
-   under a post). What it answers is not what is saved: see confirm() below. */
+/* api.fxtwitter.com: asked one kind of question only, a search of replies that say an everyday word.
+   Its answer tells which replies there are and which post each one answers. The words that are saved
+   are read from X (twoStages below). */
 const fx = {
   name: 'fxtwitter',
-  confirm: true,
   record(st) {
     const a = (st && st.author) || {};
-    const v = (a.verification && a.verification.type) || '';
+    const to = (st && st.replying_to) || {};
     return {
       id: String((st && st.id) || ''), raw: String((st && st.text) || ''),
-      user: { username: String(a.screen_name || ''), name: a.name || '', description: a.description || '', protected: !!a.protected, org: v === 'organization' || v === 'government', followers: a.followers || 0 },
-      replyTo: st && st.replying_to && st.replying_to.status ? String(st.replying_to.status) : '', isReply: !!(st && st.replying_to),
+      user: { username: String(a.screen_name || ''), name: a.name || '', description: a.description || '', protected: !!a.protected, org: false, followers: a.followers || 0 },
+      replyTo: to.status ? String(to.status) : '', replyToHandle: String(to.screen_name || ''), isReply: !!to.status,
       quote: !!(st && st.quote), repost: !!(st && st.reposted_by), replies: (st && st.replies) || 0, likes: (st && st.likes) || 0,
-      sensitive: !!(st && st.possibly_sensitive), media: !!(st && st.media && Object.keys(st.media).length), at: iso(st && st.created_at),
+      sensitive: !!(st && st.possibly_sensitive), media: false, at: iso(st && st.created_at),
     };
   },
-  async get(pathname) {
+  /* Replies that say the word, written in two hours drawn from the last two days. */
+  async search(word, lang) {
     asked++;
+    const until = Math.floor(Date.now() / 1000) - (1 + Math.floor(Math.random() * 46)) * 3600;
+    const q = `${word} filter:replies -filter:retweets lang:${lang} since_time:${until - 7200} until_time:${until}`;
     let res;
-    try { res = await fetch((process.env.XAPI_FX_BASE || 'https://api.fxtwitter.com') + pathname, { headers: { 'user-agent': 'githito.xapi collector' }, signal: AbortSignal.timeout(20000) }); }
-    catch (e) { return null; }
+    try { res = await fetch((process.env.XAPI_FX_BASE || 'https://api.fxtwitter.com') + '/2/search?count=100&q=' + encodeURIComponent(q), { headers: { 'user-agent': 'githito.xapi collector' }, signal: AbortSignal.timeout(30000) }); }
+    catch (e) { throw new Refused('search did not answer'); }
     const data = await res.json().catch(() => null);
     /* A search that is refused answers 404 (one that finds nothing answers 200 with no results). */
-    if (pathname.startsWith('/2/search') && (res.status !== 200 || (data && data.code && data.code !== 200))) throw new Refused('search refused (' + res.status + ')');
-    return res.ok ? data : null;
-  },
-  /* People's own posts about a word that someone answered; half the searches look at yesterday or the day before. */
-  async posts(word, lang) {
-    let range = '';
-    if (Math.random() < 0.5) {
-      const d = new Date(Date.now() - (1 + Math.floor(Math.random() * 2)) * 86400e3).toISOString().slice(0, 10);
-      range = ` since:${d} until:${new Date(Date.parse(d) + 86400e3).toISOString().slice(0, 10)}`;
-    }
-    const data = await this.get('/2/search?q=' + encodeURIComponent(`${word} -filter:replies -filter:retweets min_replies:2 lang:${lang}${range}`));
+    if (res.status !== 200 || (data && data.code && data.code !== 200)) throw new Refused('search refused (' + res.status + ')');
     return ((data && data.results) || []).map(st => this.record(st));
   },
-  async replies(id) {
-    const data = await this.get('/2/conversation/' + id);
-    return ((data && data.replies) || []).map(st => this.record(st));
-  },
 };
-/* What is saved comes from X itself. The post and each reply are read again through X's official embed
-   API; one that X does not show, or whose words or writer differ from what the finder said, is dropped.
-   The talk is kept when the post and one reply at least are confirmed. */
-let differed = 0;
-let gone = 0;
-async function confirm(post, replies) {
-  const check = async m => {
-    const e = await readEmbed(m.handle, m.id);
-    if (!e) { gone++; return null; }
-    if (e.handle.toLowerCase() !== m.handle.toLowerCase() || !sameWords(e.raw, m.text)) { differed++; return null; }
-    return { ...m, handle: e.handle, text: plain(e.raw), url: 'https://x.com/' + e.handle + '/status/' + m.id };
+/* A post or a reply read from X itself (its official embed API), as the plain record the rules read. */
+async function fromX(handle, id, replyTo) {
+  const e = await readEmbed(handle, id);
+  if (!e) return null;
+  read++;
+  return {
+    id: e.id, raw: e.raw,
+    user: { username: e.handle, name: e.name, description: '', protected: false, org: false, followers: 0 },
+    replyTo: replyTo || '', isReply: !!replyTo, quote: false, repost: false, replies: 1, likes: 0, sensitive: false, media: false, at: '',
   };
-  const [p, ...rs] = await Promise.all([check(post), ...replies.map(check)]);
-  const kept = rs.filter(Boolean);
-  return p && kept.length ? { post: p, replies: kept } : null;
+}
+/* The two stages. */
+async function twoStages(lang, genres, any) {
+  const file = path.join(CONF.out, 'v1', `talks-${lang}.json`);
+  const before = await readJson(file, { talks: [] });
+  /* Talks collected the earlier way (genre words) leave; the ones found this way and the ones sent by hand stay. */
+  const old = (Array.isArray(before.talks) ? before.talks : []).filter(t => t && t.id && t.post && Array.isArray(t.replies) && (t.manual || t.via === 'random'));
+  const have = new Set(old.map(t => t.id));
+  const people = new Set();
+  const found = [];
+  const words = shuffle(any);
+  let searches = 0;
+  let refusals = 0;
+  let replies = 0;
+  let passed = 0;
+  let gone = 0;
+  for (let n = 0; n < CONF.searches && found.length < CONF.add; n++) {
+    /* Stage 1: one search, with a word that belongs to no genre. */
+    const word = words[n % words.length];
+    let list;
+    try { list = await fx.search(word, lang); searches++; refusals = 0; }
+    catch (e) {
+      if (!(e instanceof Refused)) throw e;
+      if (++refusals >= 3) { console.log(`  ${e.message}: stopping with what was found`); break; }
+      console.log(`  ${e.message}: resting 90 seconds`);
+      await sleep(90000);
+      continue;
+    }
+    replies += list.length;
+    /* Stage 2, here: which replies have a punch, about a post not yet kept. */
+    const cands = [];
+    list.forEach(r => {
+      if (!r.replyTo || !r.replyToHandle || have.has(r.replyTo)) return;
+      if (people.has(r.replyToHandle.toLowerCase()) || cands.some(c => c.parent.id === r.replyTo)) return;
+      const kept = pickReplies({ id: r.replyTo, handle: r.replyToHandle, text: '' }, [r], lang);
+      if (kept.length) cands.push({ parent: { id: r.replyTo, handle: r.replyToHandle }, reply: kept[0] });
+    });
+    passed += cands.length;
+    /* Then X itself is asked for the post and for the reply, and the rules judge X's own words. */
+    let got = 0;
+    for (let i = 0; i < cands.length && found.length < CONF.add; i += 4) {
+      const pairs = await Promise.all(cands.slice(i, i + 4).map(async c => {
+        const p = await fromX(c.parent.handle, c.parent.id, '');
+        if (!p) { gone++; return null; }
+        const post = talkPost(p, lang);
+        if (!post) return null;
+        const r = await fromX(c.reply.handle, c.reply.id, post.id);
+        if (!r) { gone++; return null; }
+        const kept = pickReplies(post, [r], lang);
+        return kept.length ? { post, replies: kept } : null;
+      }));
+      pairs.forEach(t => {
+        if (!t || found.length >= CONF.add || have.has(t.post.id) || people.has(t.post.handle.toLowerCase())) return;
+        have.add(t.post.id);
+        people.add(t.post.handle.toLowerCase());
+        /* Sorted into a genre by what the talk says. */
+        const g = genreOf(t.post.text + ' ' + t.replies.map(r => r.text).join(' '), lang, genres);
+        found.push({ id: t.post.id, genre: g.genre, word: g.word, found: stamp(), via: 'random', post: t.post, replies: t.replies });
+        got++;
+      });
+    }
+    console.log(`  ${lang} search ${n + 1} "${word}": ${list.length} replies, ${cands.length} pass the reply rules, ${got} talks (${found.length} so far)`);
+    if (found.length < CONF.add) await sleep(CONF.pause);
+  }
+  const talks = shuffle(found).concat(old.filter(t => young(t, CONF.hours) && stillOk(t))).slice(0, CONF.keep);
+  const made = {};
+  found.forEach(t => { made[t.genre] = (made[t.genre] || 0) + 1; });
+  console.log(`  ${lang} stage 1: ${searches} random searches gave ${replies} replies.`);
+  console.log(`  ${lang} stage 2: ${passed} passed the reply rules; ${found.length} became talks ${JSON.stringify(made)}; ${gone} were not shown by X. ${talks.length} talks in the API.`);
+  return { version: 1, lang, updated: stamp(), source: 'fxtwitter', count: talks.length, talks };
 }
 const official = {
   name: 'official',
@@ -188,15 +247,13 @@ async function collect(lang, genres, src) {
     for (let i = 0; i < cands.length && got < CONF.perWord && i < 12 && read < CONF.reads; i += 4) {
       const batch = cands.slice(i, i + 4);
       const lists2 = await Promise.all(batch.map(c => src.replies(c.post.id).catch(e => { if (e instanceof Refused) return []; throw e; })));
-      /* This program chooses: the replies with a punch. Then X's own words are read for the ones chosen. */
-      const chosen = batch.map((c, k) => ({ c, replies: pickReplies(c.post, lists2[k] || [], lang) })).filter(x => x.replies.length);
-      const sure = await Promise.all(chosen.map(x => (src.confirm ? confirm(x.c.post, x.replies) : { post: x.c.post, replies: x.replies })));
-      chosen.forEach((x, k) => {
-        const t = sure[k];
-        if (!t || got >= CONF.perWord || found.length >= CONF.add) return;
-        have.add(t.post.id);
-        people.add(t.post.handle.toLowerCase());
-        found.push({ id: t.post.id, genre, word, found: stamp(), post: t.post, replies: t.replies });
+      batch.forEach((c, k) => {
+        if (got >= CONF.perWord || found.length >= CONF.add) return;
+        const replies = pickReplies(c.post, lists2[k] || [], lang);
+        if (!replies.length) return;
+        have.add(c.post.id);
+        people.add(c.post.handle.toLowerCase());
+        found.push({ id: c.post.id, genre, word, found: stamp(), post: c.post, replies });
         got++;
       });
     }
@@ -218,15 +275,15 @@ async function main() {
   }
   const src = name === 'official' ? official : fx;
   if (src === official && !CONF.token) throw new Error('The source is official but X_BEARER_TOKEN is not set.');
-  const { genres } = JSON.parse(await readFile(path.join(HERE, 'words.json'), 'utf8'));
+  const { genres, any } = JSON.parse(await readFile(path.join(HERE, 'words.json'), 'utf8'));
   const outs = [];
   for (const lang of (CONF.langs.length ? CONF.langs : ['ja'])) {
-    console.log(`Collecting ${lang}: found by ${src.name}${src.confirm ? ', words read from X' : ''}`);
-    const out = await collect(lang, genres, src);
+    console.log(src === fx ? `Collecting ${lang}: random searches, this program's filter, words read from X` : `Collecting ${lang} from X's API`);
+    const out = src === fx ? await twoStages(lang, genres, (any && any[lang]) || []) : await collect(lang, genres, src);
     outs.push(out);
     if (!CONF.dry) await writeApi(CONF.out, out, genres);
   }
   if (!CONF.dry) await writeIndex(CONF.out, src.name, outs);
-  console.log(src.confirm ? `Asked ${src.name} ${asked} times. Dropped: ${gone} that X does not show, ${differed} whose words differed.` : `Asked X ${asked} times; X returned ${read} posts.`);
+  console.log(src === fx ? `Asked api.fxtwitter.com ${asked} times (random searches only). Read ${read} posts and replies from X's official embed API.` : `Asked X ${asked} times; X returned ${read} posts.`);
 }
 main().catch(e => { console.error(e.message || e); process.exit(1); });

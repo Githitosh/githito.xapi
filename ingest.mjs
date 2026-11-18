@@ -12,7 +12,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { CJK, plain, talkPost, pickReplies, stamp, readJson, writeApi, writeIndex, young, readEmbed } from './rules.mjs';
+import { CJK, plain, talkPost, pickReplies, stamp, readJson, writeApi, writeIndex, young, readEmbed, genreOf } from './rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -38,11 +38,6 @@ async function readLink(handle, id) {
 }
 
 /* ---------- one talk from its links ---------- */
-function genreOf(text, lang, genres) {
-  let best = null;
-  genres.forEach(g => (g[lang] || []).forEach(w => { if (text.toLowerCase().includes(w.toLowerCase()) && (!best || w.length > best.word.length)) best = { genre: g.id, word: w }; }));
-  return best || { genre: 'other', word: '' };
-}
 async function talkFrom(body, genres) {
   const links = [];
   for (const m of String(body || '').matchAll(LINK)) if (!links.some(l => l.id === m[2])) links.push({ handle: m[1], id: m[2] });
@@ -58,7 +53,7 @@ async function talkFrom(body, genres) {
   if (!replies.length) return { error: 'No reply may play: too long, the same writer as the post, or words that never play.' };
   /* A genre written in the issue ("genre: food") wins; else the genre whose word the post says. */
   const named = (String(body).match(/^\s*genre\s*[:：]\s*([a-z]+)\s*$/im) || [])[1];
-  const g = named && genres.some(x => x.id === named) ? { genre: named, word: '' } : genreOf(post.text, lang, genres);
+  const g = named && genres.some(x => x.id === named) ? { genre: named, word: '' } : genreOf(post.text + ' ' + replies.map(r => r.text).join(' '), lang, genres);
   return { lang, talk: { id: post.id, genre: g.genre, word: g.word, found: stamp(), manual: true, post, replies } };
 }
 

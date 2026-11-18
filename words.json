@@ -43,7 +43,32 @@
     "aurora",
     "comet",
     "black hole"
-   ]
+   ],
+   "tell": {
+    "ja": [
+     "宇宙",
+     "星座",
+     "星空",
+     "月面",
+     "惑星",
+     "天文",
+     "ロケット",
+     "衛星",
+     "銀河",
+     "流星",
+     "彗星",
+     "皆既"
+    ],
+    "en": [
+     "space",
+     "planet",
+     "rocket",
+     "galaxy",
+     "astronaut",
+     "telescope",
+     "nasa"
+    ]
+   }
   },
   {
    "id": "politics",
@@ -88,7 +113,35 @@
     "poll",
     "city hall",
     "ballot"
-   ]
+   ],
+   "tell": {
+    "ja": [
+     "政治",
+     "選挙",
+     "国会",
+     "首相",
+     "総理",
+     "議員",
+     "政府",
+     "大臣",
+     "知事",
+     "市長",
+     "投票",
+     "政党",
+     "増税",
+     "減税",
+     "法案"
+    ],
+    "en": [
+     "politic",
+     "election",
+     "congress",
+     "senate",
+     "governor",
+     "mayor",
+     "president"
+    ]
+   }
   },
   {
    "id": "science",
@@ -133,7 +186,36 @@
     "weather",
     "insects",
     "Nobel"
-   ]
+   ],
+   "tell": {
+    "ja": [
+     "科学",
+     "研究",
+     "実験",
+     "論文",
+     "数学",
+     "物理",
+     "化学",
+     "生物",
+     "AI",
+     "ロボット",
+     "遺伝子",
+     "恐竜",
+     "化石",
+     "天気予報",
+     "気温",
+     "台風"
+    ],
+    "en": [
+     "science",
+     "research",
+     "physics",
+     "chemistry",
+     "biology",
+     "robot",
+     "study finds"
+    ]
+   }
   },
   {
    "id": "culture",
@@ -178,7 +260,36 @@
     "ballet",
     "sculpture",
     "history"
-   ]
+   ],
+   "tell": {
+    "ja": [
+     "美術",
+     "展覧会",
+     "博物館",
+     "美術館",
+     "伝統",
+     "祭り",
+     "神社",
+     "お寺",
+     "着物",
+     "読書",
+     "小説",
+     "図書館",
+     "書道",
+     "茶道",
+     "落語",
+     "歌舞伎"
+    ],
+    "en": [
+     "museum",
+     "gallery",
+     "exhibit",
+     "poetry",
+     "novel",
+     "library",
+     "heritage"
+    ]
+   }
   },
   {
    "id": "local",
@@ -223,7 +334,33 @@
     "parade",
     "block party",
     "local bus"
-   ]
+   ],
+   "tell": {
+    "ja": [
+     "地元",
+     "田舎",
+     "方言",
+     "商店街",
+     "駅前",
+     "近所",
+     "市役所",
+     "町内",
+     "バス停",
+     "終電",
+     "満員電車",
+     "電車",
+     "ご当地",
+     "引っ越"
+    ],
+    "en": [
+     "hometown",
+     "neighborhood",
+     "downtown",
+     "small town",
+     "city council",
+     "commute"
+    ]
+   }
   },
   {
    "id": "entertainment",
@@ -268,7 +405,37 @@
     "box office",
     "award show",
     "streaming"
-   ]
+   ],
+   "tell": {
+    "ja": [
+     "映画",
+     "ドラマ",
+     "アニメ",
+     "漫画",
+     "マンガ",
+     "ゲーム",
+     "ライブ",
+     "推し",
+     "声優",
+     "アイドル",
+     "配信",
+     "番組",
+     "新曲",
+     "主題歌",
+     "最終回",
+     "ガチャ"
+    ],
+    "en": [
+     "movie",
+     "tv show",
+     "anime",
+     "video game",
+     "concert",
+     "album",
+     "episode",
+     "trailer"
+    ]
+   }
   },
   {
    "id": "safety",
@@ -308,7 +475,32 @@
     "speed limit",
     "park ranger",
     "crossing guard"
-   ]
+   ],
+   "tell": {
+    "ja": [
+     "警察",
+     "交番",
+     "消防",
+     "防災",
+     "防犯",
+     "パトカー",
+     "救急車",
+     "落とし物",
+     "迷子",
+     "横断歩道",
+     "シートベルト",
+     "ヘルメット",
+     "避難訓練"
+    ],
+    "en": [
+     "police",
+     "firefighter",
+     "fire drill",
+     "seat belt",
+     "helmet",
+     "lost and found"
+    ]
+   }
   },
   {
    "id": "sports",
@@ -357,7 +549,40 @@
     "fantasy football",
     "playoffs",
     "gym"
-   ]
+   ],
+   "tell": {
+    "ja": [
+     "試合",
+     "選手",
+     "優勝",
+     "野球",
+     "サッカー",
+     "ゴルフ",
+     "テニス",
+     "マラソン",
+     "相撲",
+     "バスケ",
+     "監督",
+     "ホームラン",
+     "筋トレ",
+     "ジム",
+     "甲子園",
+     "五輪"
+    ],
+    "en": [
+     "game day",
+     "playoff",
+     "baseball",
+     "soccer",
+     "football",
+     "nba",
+     "nfl",
+     "tennis",
+     "golf",
+     "marathon",
+     "gym"
+    ]
+   }
   },
   {
    "id": "food",
@@ -406,7 +631,46 @@
     "meal prep",
     "cookies",
     "ramen"
-   ]
+   ],
+   "tell": {
+    "ja": [
+     "食べ",
+     "ご飯",
+     "ごはん",
+     "美味",
+     "おいし",
+     "うまい",
+     "ラーメン",
+     "カレー",
+     "寿司",
+     "焼肉",
+     "弁当",
+     "おにぎり",
+     "スイーツ",
+     "ケーキ",
+     "アイス",
+     "唐揚げ",
+     "餃子",
+     "ビール",
+     "コーヒー",
+     "料理",
+     "自炊",
+     "お腹"
+    ],
+    "en": [
+     "food",
+     "recipe",
+     "pizza",
+     "burger",
+     "taco",
+     "pasta",
+     "dessert",
+     "coffee",
+     "breakfast",
+     "snack",
+     "cooking"
+    ]
+   }
   },
   {
    "id": "restaurant",
@@ -451,7 +715,36 @@
     "happy hour",
     "reservation",
     "tip"
-   ]
+   ],
+   "tell": {
+    "ja": [
+     "レストラン",
+     "カフェ",
+     "居酒屋",
+     "定食",
+     "お店",
+     "店員",
+     "ランチ",
+     "ファミレス",
+     "回転寿司",
+     "食べ放題",
+     "メニュー",
+     "行列",
+     "予約",
+     "喫茶店",
+     "ラーメン屋"
+    ],
+    "en": [
+     "restaurant",
+     "cafe",
+     "diner",
+     "waiter",
+     "menu",
+     "takeout",
+     "brunch",
+     "drive thru"
+    ]
+   }
   },
   {
    "id": "romance",
@@ -480,7 +773,34 @@
     "long distance",
     "my partner",
     "honeymoon"
-   ]
+   ],
+   "tell": {
+    "ja": [
+     "彼氏",
+     "彼女",
+     "旦那",
+     "嫁",
+     "夫婦",
+     "デート",
+     "結婚",
+     "恋愛",
+     "片思い",
+     "告白",
+     "記念日",
+     "同棲",
+     "プロポーズ"
+    ],
+    "en": [
+     "boyfriend",
+     "girlfriend",
+     "husband",
+     "wife",
+     "date night",
+     "anniversary",
+     "crush",
+     "wedding"
+    ]
+   }
   },
   {
    "id": "travel",
@@ -668,7 +988,93 @@
     "Yellowstone",
     "Yosemite",
     "Zion"
-   ]
+   ],
+   "tell": {
+    "ja": [
+     "旅行",
+     "観光",
+     "温泉",
+     "旅先",
+     "ホテル",
+     "空港",
+     "新幹線",
+     "絶景",
+     "紅葉",
+     "お土産",
+     "旅館",
+     "聖地巡礼"
+    ],
+    "en": [
+     "travel",
+     "trip",
+     "vacation",
+     "hotel",
+     "airport",
+     "sightseeing",
+     "road trip"
+    ]
+   }
   }
- ]
+ ],
+ "any": {
+  "ja": [
+   "笑",
+   "草",
+   "w",
+   "ワロタ",
+   "😂",
+   "🤣",
+   "なんで",
+   "まじで",
+   "やばい",
+   "すぎる",
+   "まさか",
+   "ほんとに",
+   "それな",
+   "やん",
+   "じゃん",
+   "今日",
+   "昨日",
+   "さっき",
+   "明日",
+   "仕事",
+   "学校",
+   "友達",
+   "最近",
+   "やっと",
+   "ついに",
+   "なぜか",
+   "結局",
+   "久しぶり",
+   "初めて",
+   "気づいた",
+   "忘れた",
+   "買った",
+   "食べた",
+   "行った",
+   "見た",
+   "朝から",
+   "眠い",
+   "寒い",
+   "えっ",
+   "ちょっと"
+  ],
+  "en": [
+   "lol",
+   "lmao",
+   "haha",
+   "😂",
+   "wait",
+   "bro",
+   "why",
+   "literally",
+   "same",
+   "honestly",
+   "today",
+   "finally",
+   "somehow",
+   "forgot",
+   "again"
+  ]
+ }
 }

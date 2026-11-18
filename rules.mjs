@@ -137,6 +137,23 @@ export async function readEmbed(handle, id) {
 /* The same words, whatever the spaces and marks. */
 export const sameWords = (a, b) => squash(plain(a)) === squash(plain(b));
 
+/* ---------- which genre a talk is about ---------- */
+/* Decided here, from the talk's own words: the genre whose words it says most. A word from the genre's
+   main list names the talk (it becomes the talk's first card); the other telling words only sort it.
+   A talk that says none of them is "other". */
+export function genreOf(text, lang, genres) {
+  const hay = String(text || '').toLowerCase();
+  let best = { genre: 'other', word: '', score: 0 };
+  genres.forEach(g => {
+    let score = 0;
+    let word = '';
+    (g[lang] || []).forEach(x => { if (hay.includes(x.toLowerCase())) { score += 2 * [...x].length; if ([...x].length > [...word].length) word = x; } });
+    ((g.tell && g.tell[lang]) || []).forEach(x => { if (hay.includes(x.toLowerCase())) score += [...x].length; });
+    if (score > best.score) best = { genre: g.id, word, score };
+  });
+  return { genre: best.genre, word: best.word };
+}
+
 /* ---------- the API's files ---------- */
 /* One language: every talk, and one file for each genre (the answer to "search this genre"). */
 export async function writeApi(outDir, out, genres) {

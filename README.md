@@ -17,7 +17,7 @@
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/index.json` | 最終更新の時刻と、ジャンルごとの件数 |
 
 ジャンル：`space` `politics` `science` `culture` `local` `entertainment` `safety` `sports` `food`
-`restaurant` `romance` `travel`
+`restaurant` `romance` `travel`（手で送った会話でどれにも当たらないものは `other`）
 
 ## いつ更新されるか
 
@@ -26,7 +26,28 @@
 GitHub の都合で、開始が数分〜十数分遅れることがあります。
 Actions タブ →「Collect」→ Run workflow で、すぐ1回動かすこともできます。
 
-## どこから集めるか（`config.json` の `source`）
+## 自分で見つけた会話を送る（無料・鍵なし）
+
+自分のXアカウントで普通に検索して見つけた「投稿＋返信」を、このAPIに取り込めます。
+
+1. このリポジトリで新しい Issue を作ります。タイトルは `talk`。
+2. 本文に、Xのリンクを1行ずつ書きます。**1行目が投稿、2行目以降が返信**です（返信は最大20件）。
+   ```
+   https://x.com/投稿した人/status/1234567890
+   https://x.com/返信した人/status/1234567999
+   ```
+3. Submit を押すと、1〜2分で `ingest.mjs` が動いてAPIに入り、Issue は結果のコメント付きで閉じられます。
+
+- 本文は、Xが鍵なしで公開している公式の埋め込みAPI（`publish.x.com/oembed`）で読みます。料金はかかりません。Xにログインしたり、検索を自動で行ったりはしません。
+- 読むのは、**このリポジトリの持ち主が作った Issue だけ**です。ほかの人が作った Issue は無視します。
+- 返信が複数あるときは、笑いやツッコミのあるものを最大2件選びます。暴力・性的な内容・重い話題・けんか腰の言葉がある投稿は入りません（理由が Issue にコメントされます）。
+- ジャンルは、投稿に入っている言葉（`words.json`）から自動で決めます。指定したいときは、本文に `genre: food` のように1行足します。
+- 手で送った会話は、14日間APIに残ります（自動で集めた会話は48時間）。
+
+リプライニュースのページからも送れます。`https://githitosh.github.io/reply-news/?owner=1` を一度開くと、
+「会話を追加」の欄に「xapiに送る」ボタンが出ます。投稿とリプライのリンクを貼って押すと、上の Issue の画面が内容入りで開きます。
+
+## 自動で集める（`config.json` の `source`）
 
 **今は `off` で、まだ何も集めていません。**
 
@@ -102,10 +123,13 @@ api.fxtwitter.com の元になっている公開プログラム（FxEmbed、MIT�
 
 | ファイル | 役割 |
 |---|---|
-| `collect.mjs` | 集めるプログラム（Node 20 以上。追加のインストールは不要） |
+| `collect.mjs` | 自動で集めるプログラム（Node 20 以上。追加のインストールは不要） |
+| `ingest.mjs` | 手で送った会話（Issue）を取り込むプログラム |
+| `rules.mjs` | 選ぶルールと、APIのファイルの書き出し（上の2つが共通で使う） |
 | `words.json` | ジャンルごとの検索語 |
 | `config.json` | 設定 |
 | `.github/workflows/collect.yml` | 1日3回の定期実行と、ブランチ `api` への公開 |
+| `.github/workflows/ingest.yml` | Issue が作られたときの取り込みと公開 |
 
 手元で動かす場合：
 

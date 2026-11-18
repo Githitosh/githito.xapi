@@ -13,7 +13,7 @@ const ADULT = /セックス|エッチ|えっち|ｴｯﾁ|エロ|下ネタ|ヤ�
 const NEVER = /ヤリモク|風俗|パパ活|ママ活|援交|AV女優|アダルト|porn|onlyfans|中学|小学|ＪＫ|ＪＣ|ＪＳ|\bJ[KCS]\b|高校生|女子高生|男子高生|未成年|ロリ|ショタ|\bteen|high school|middle school|underage|\bloli|\bshota|ＤＶ|\bDV\b|モラハラ|殴られ|abuse|レイプ|強姦|無理やり|盗撮|痴漢/i;
 const UNSAFE = new RegExp(ADULT.source + '|' + NEVER.source, 'i');
 const MINOR_BIO = /(?:^|[^0-9])1[0-7]\s*(?:歳|才|y\/?o\b|years? old)|高[1-3１-３一二三](?:$|[^0-9０-９])|中[1-3１-３一二三](?:$|[^0-9０-９])|高校生|中学生|ＪＫ|ＪＣ|\bJ[KC]\b|\bminor\b|\bunder ?18\b|\bteen\b/i;
-const AD = /PR|広告|キャンペーン|プレゼント企画|応募|フォロー[&＆]|RTで|リツイートで|セール|クーポン|予約受付|販売中|\bgiveaway\b|\bsale\b|\bpromo\b|\bdiscount\b|\bsponsored\b/i;
+const AD = /PR|広告|キャンペーン|プレゼント企画|抽選で|名様|応募|フォロー[&＆]|RTで|リツイートで|セール|クーポン|予約受付|販売中|\bgiveaway\b|\bsale\b|\bpromo\b|\bdiscount\b|\bsponsored\b/i;
 const TOXIC = /バカ|ばか(?!り)|馬鹿|アホ|あほ(?!う)|阿呆|クズ|カス(?![タテ])|キモ(?:[いイッ]|$)|きも[いっ]|気持ち悪|気色[わ悪]|ウザ|うざ[いっ]|消えろ|黙れ|だまれ|お前|おまえ|てめ[えぇー]|貴様|低脳|低能|無能|老害|痴呆|キチガイ|ガイジ|チー牛|ブス|デブ|ババア|ジジイ|嘘つき|ウソつき|うそつき|捏造|売国|反日|左翼|右翼|パヨク|ネトウヨ|恥を知|頭悪|頭おかし|\b(?:idiot|stupid|moron|dumb|loser|trash|shut up|stfu|libtard|clown)\b/i;
 const GREET = /^[\s\p{Extended_Pictographic}️]*(?:おは|オハ|こんにち|こんばん|おやす|おつ|お疲れ|おめで|ありがと|はじめまして|初めまして|good morning|gm\b|good night|congrat|thank)|良い一日|よい一日|良い1日|素敵な(?:一日|1日|週末)|今日も(?:一日|1日)?(?:頑張|がんば|よろしく)|よろしくお願い|フォロー(?:ありがとう|失礼|させて)|have a (?:great|good|nice) day/iu;
 const GLOOM = /骨折|折って|怪我|ケガ|手術|通院|発熱|インフル|コロナ|訃報|葬儀|お葬式|遺影|倒産|解雇|失業|借金|離婚|亡き|\b(?:injur|surgery|funeral|divorce|laid off|fired)\w*/i;
@@ -107,6 +107,72 @@ export function pickReplies(post, list, lang, chosen) {
   return kept.slice(0, 2).map(({ tk, score, punch, ...r }) => r);
 }
 
+/* ---------- matching: a line that can answer a post it was not written to ---------- */
+/* Matching News puts a person's post beside a reply that was written to some other post. That reads as
+   a talk only when the reply brings no subject of its own: a laugh, a "really?", a "same".
+   So a line is kept with what it needs: the words in it that are about something (a word in kanji, in
+   katakana or in Latin letters, a number) and are not plain words of reaction. A line may be matched
+   to a post that says every word it needs; a line that needs nothing may be matched to any post. */
+const REACT = new Set(('草 笑 爆笑 大爆笑 大草原 通 最高 最強 最悪 天才 可愛 美 綺麗 凄 好 大好 本当 無理 尊 神 優勝 素敵 流石 同意 同感 納得 共感 理解 確 分 全部 全 絶対 完全 完璧 '
+  + '何 何故 一緒 私 俺 僕 自分 今 気 泣 嘘 意味 意味不明 不明 天使 正解 普通 逆 謎 強 怖 面白 楽 嬉 良 違 思 言 見 知 待 欲 出 来 行 人 方 事 時 感 感動 的 一番 一生 永遠 幸 幸せ 愛 大丈夫 元気 平和 世界 人生 '
+  + 'ワロタ ワロ ワロス ヤバ ヤバイ ヤバス マジ ガチ ホント ホンマ ダメ ウケ スゴ スゴイ エグ エグイ ナイス オモロ ウソ ムリ ソレナ セヤナ カワイイ カワイ イイネ アカン ナニ ナゼ コレ ソレ アレ ドレ ツボ センス ワイ オレ ボク スキ サイコー サスガ '
+  + 'lol lmao ok omg wow').split(' '));
+const REACT_EN = new Set('same true agree agreed exactly right facts fact real really literally actually wait what why how this that thats these those love cute nice great good best haha hahaha hilarious funny crying dying dead yeah yes nope never always just very much more most even still here there with from your youre have been were they them their about would could should absolutely honestly totally perfect amazing awesome incredible legend genius king queen mood vibes relatable same'.split(' '));
+const THANKS = /ありがと|あざす|あざっす|感謝|ごめん|すみません|すいません|失礼|申し訳|おめで|お疲れ|おつかれ|おはよ|こんにち|こんばん|おやすみ|よろしく|はじめまして|初めまして|いってら|行ってら|おかえり|お帰り|ただいま|フォロー|リプ|返信|ＤＭ|\bDM\b|\b(?:thanks?|thank you|sorry|congrat\w*|welcome|good (?:morning|night))\b/i;
+const CALLED = /さん|くん|ちゃん|様|氏|先生|先輩|パイセン|ニキ|ネキ|[@＠]/;
+const ANSWERS = /^[\s\p{Extended_Pictographic}️]*(?:はい|いいえ|いえ|うん|ううん|そうです|そうなん|ですです|です[ねよ]?[！!。]*$|yes\b|no\b|yep\b|nope\b)/iu;
+const CUE = {
+  ja: /やば|ヤバ|すご|スゴ|すげ|凄|まじ|マジ|ガチ|えぐ|エグ|かわい|カワイ|可愛|それな|わかる|分かる|わかりみ|たしかに|確かに|なぜ|何故|なんで|まさか|ほんと|ホント|本当|ホンマ|ほんま|最高|天才|さすが|流石|好き|すき|尊|神|無理|むり|ムリ|えっ|えー|おお|うわ|へぇ|へー|いいな|いいね|ええな|ええやん|うらやま|羨ま|つよ|強い|こわ|怖|じわ|ツボ|おもろ|面白|センス|優勝|ずる|ズル|しんど|泣|[！!？?]/,
+  en: /\b(?:same|true|wait|what|why|how|wow|omg|nah|bro|literally|real|mood|love|cute|nice|great)\b|[!?]/i,
+};
+const AGREE = /その通り|そのとおり|それな|わかる|分かる|わかりみ|たしかに|確かに|ほんそれ|ほんとそれ|せやな|だよね|ですよね|同意|同感|同じく|\b(?:same|true|agreed?|exactly|facts)\b/i;
+/* null, or what the line needs and whether it agrees (agreeing with a question does not read as an answer). */
+export function lineOf(text, lang) {
+  const t = String(text || '').trim();
+  const n = charLen(t);
+  if (n < 2 || n > (lang === 'en' ? 48 : 24) || THANKS.test(t) || CALLED.test(t) || ANSWERS.test(t)) return null;
+  if (lang === 'en' ? !/[A-Za-z]{2,}/.test(t) : !CJK.test(t)) return null;
+  if (!isFunny(t, lang) && !QUIP[lang].test(t) && !CUE[lang].test(t)) return null;
+  const bare = t.replace(/\p{Extended_Pictographic}|️|‍/gu, ' ');
+  const needs = [];
+  const runs = lang === 'en' ? (bare.toLowerCase().match(/[a-z']{4,}|[0-9]+/g) || []) : (bare.match(/[一-龯々〆ヶ]+|[ァ-ヴー]{2,}|[A-Za-zＡ-Ｚａ-ｚ]{2,}|[0-9０-９]+/g) || []);
+  runs.forEach(w => {
+    const k = w.replace(/^ー+|ー+$/g, '');
+    if (!k || /^[wWｗＷ]+$/.test(k) || (lang === 'en' ? REACT_EN : REACT).has(lang === 'en' ? k.replace(/'/g, '') : k) || REACT.has(k.toLowerCase())) return;
+    if (!needs.includes(k)) needs.push(k);
+  });
+  if (needs.length > 2) return null;
+  return { needs, kind: AGREE.test(t) ? 'agree' : 'react' };
+}
+/* A reply that can be such a line, as it is saved: its words, its writer, its own address, and the
+   post it was really written to. */
+export function pickLine(p, lang) {
+  const u = p && p.user;
+  if (!p || !p.id || !u || !u.username || u.protected || minor(u) || !p.replyTo) return null;
+  if (/^\s*(?:@\w+\s+)*[>＞]/.test(p.raw)) return null;
+  const text = plain(p.raw);
+  if (!safe(text, p) || POLITE.test(text) && !isFunny(text, lang)) return null;
+  const line = lineOf(text, lang);
+  if (!line) return null;
+  return { id: p.id, handle: u.username, text, url: 'https://x.com/' + u.username + '/status/' + p.id, to: p.replyTo, toHandle: p.replyToHandle || '', needs: line.needs, kind: line.kind };
+}
+/* A post that stands by itself, for Matching News. X's embed API does not tell whether a post answers
+   another one, so the words are judged: no thanks or greeting to someone, nobody called by name at the
+   start, no opening that points back at what was said before ("それ", "私も"), not a headline in brackets,
+   and long enough to say something. */
+const BACK = /^[\s\p{Extended_Pictographic}️]*(?:そう|それ|あれ|その|あの|うん|はい|いや|いえ|ですよね|だよね|ですです|わー|やった|なるほど|たしかに|確かに|ほんと|ホント|本当に?[！!そ]|まじ[！!？?で]|マジ[！!？?で]|え[、っ！!ー？?]|おお|あー|わかる|分かる|ご本人|ですね|\b(?:yes|no|yeah|same|true|thanks?|lol)\b)/iu;
+const NAMED_FIRST = /^[^\s、。！!？?]{1,12}(?:さん|ちゃん|くん|様|氏|先生)[、。！!〜ー\s\p{Extended_Pictographic}]/u;
+const ME_TOO = /(?:私|わたし|俺|僕|うち|自分|わい|ワイ)も[^っ]|あなた|貴方|あんた|\bme too\b/i;
+export function standsAlone(text, lang) {
+  const t = String(text || '').trim();
+  if (charLen(t) < (lang === 'en' ? 24 : 16)) return false;
+  return !THANKS.test(t) && !BACK.test(t) && !NAMED_FIRST.test(t) && !ME_TOO.test(t) && !/^\s*[【\[［]/.test(t);
+}
+/* A post that asks something. */
+export const asks = text => /[？?][\s\p{Extended_Pictographic}️]*$/u.test(String(text || '').trim());
+/* The same line, whatever its marks: one is enough. */
+export const lineKey = text => squash(text);
+
 /* ---------- X's official embed API ---------- */
 /* publish.x.com/oembed: X publishes it for showing posts on other sites. No key, no charge, no login.
    It answers with the post as a quote; its words are the first paragraph. Links to pictures and pages are left out. */
@@ -167,22 +233,30 @@ export async function writeApi(outDir, out, genres) {
     await writeFile(path.join(dir, id + '.json'), JSON.stringify({ version: 1, lang: out.lang, genre: id, updated: out.updated, count: talks.length, talks }) + '\n');
   }
 }
+/* Matching News' data, one language: the posts and the lines that may be matched with one another. */
+export async function writeMatch(outDir, match) {
+  await mkdir(path.join(outDir, 'v1'), { recursive: true });
+  await writeFile(path.join(outDir, 'v1', `match-${match.lang}.json`), JSON.stringify(match) + '\n');
+}
 /* The index: when each language was last written and how many talks each genre has.
    .changed tells the workflow that there is something new to publish. */
-export async function writeIndex(outDir, source, outs) {
+export async function writeIndex(outDir, source, outs, matches) {
   const index = await readJson(path.join(outDir, 'v1', 'index.json'), {});
   const langs = { ...(index.langs || {}) };
   outs.forEach(out => {
     const genres = {};
     out.talks.forEach(t => { genres[t.genre] = (genres[t.genre] || 0) + 1; });
-    langs[out.lang] = { updated: out.updated, count: out.talks.length, genres };
+    langs[out.lang] = { ...(langs[out.lang] || {}), updated: out.updated, count: out.talks.length, genres };
   });
+  (matches || []).forEach(m => { langs[m.lang] = { ...(langs[m.lang] || {}), match: { posts: m.posts.length, lines: m.lines.length } }; });
   await writeFile(path.join(outDir, 'v1', 'index.json'), JSON.stringify({ version: 1, updated: stamp(), source, langs }, null, 1) + '\n');
   await writeFile(path.join(outDir, '.changed'), stamp() + '\n');
 }
 /* A talk saved earlier is judged again by the rules as they are now, so a rule added later also clears
    what is already in the API. Talks sent by hand were chosen by the owner and stay. */
-const cleanText = t => !!t && !UNSAFE.test(t) && !VIOLENT.test(t) && !HEAVY.test(t) && !SUGGESTIVE.test(t) && !TOXIC.test(t);
+export const cleanText = t => !!t && !UNSAFE.test(t) && !VIOLENT.test(t) && !HEAVY.test(t) && !SUGGESTIVE.test(t) && !TOXIC.test(t);
+/* A post in Matching News' data is judged again the same way. */
+export const postOk = (p, lang) => !!p && !!p.id && !!p.handle && cleanText(p.text) && !GLOOM.test(p.text) && !AD.test(p.text) && !OFFICIAL.test(p.handle) && standsAlone(p.text, lang);
 export const stillOk = t => !!t.manual || (cleanText(t.post.text) && !OFFICIAL.test(t.post.handle) && t.replies.every(r => cleanText(r.text)));
 /* How long a talk stays: two days when collected, two weeks when sent by hand. */
 export const young = (t, hours) => Date.now() - Date.parse(t.found || 0) < (t.manual ? 14 * 24 : hours) * 3600e3;

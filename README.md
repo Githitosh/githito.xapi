@@ -14,6 +14,7 @@
 |---|---|
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/talks-ja.json` | その日の会話すべて（日本語、最大500件） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/search/ja/food.json` | ジャンルごとの会話（`food` の部分がジャンル） |
+| `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/match-ja.json` | マッチングニュース用：単独で読める投稿（`posts`）と、どの投稿にも合う一言（`lines`） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/index.json` | 最終更新の時刻と、ジャンルごとの件数 |
 
 ジャンル：`space` `politics` `science` `culture` `local` `entertainment` `safety` `sports` `food`
@@ -25,6 +26,22 @@
 1回で新しい会話を最大170件（実際には50件前後）集め、新しいものから500件を残します（48時間たった会話は消えます）。
 GitHub の都合で、開始が数分〜十数分遅れることがあります。
 Actions タブ →「Collect」→ Run workflow で、すぐ1回動かすこともできます。
+
+## マッチングニュース用のデータ（`match-ja.json`）
+
+ページの「マッチング」は、ある人の投稿と、別の人が**別の投稿に書いた**リプライを、ランダムに組み合わせて見せます。
+そのための2つのリストを、会話を集めるのと同じ実行で作ります（非公式のサービスへの問い合わせは増えません）。
+
+- `posts`：単独で読める投稿。お礼・あいさつ・名前への呼びかけ・「それ」「私も」で始まるような、前の発言を受けた文は外します。
+  政治の話題の投稿も外します（笑いのリプライを並べると、その人の意見のように見えてしまうため）。最大400件。
+- `lines`：それ自体に話題のない短いリプライ（笑い、驚き、同意）。24文字まで。最大300件。
+  - `needs`：そのリプライが触れている言葉（漢字・カタカナ・英字・数字の語のうち、反応の言葉でないもの）。
+    ページは、**その言葉がすべて入っている投稿にだけ**組み合わせます。空なら、どの投稿にも合います。
+    例：「いっぱい買った？？」は `["買"]` なので、「買」と書いた投稿にだけ付きます。
+  - `to` / `toHandle`：そのリプライが本当に書かれた先の投稿と相手。ページは、本当の組み合わせをマッチングとして出しません。
+  - `kind`：`agree`（同意）は、質問で終わる投稿には付けません。
+- どちらも本文と投稿者は X公式の埋め込みAPIで読んだものです。48時間で消えます。
+- 判定のルールは `rules.mjs` の `lineOf`（一言）と `standsAlone`（投稿）にあります。
 
 ## 自分で見つけた会話を送る（無料・鍵なし）
 
@@ -126,6 +143,8 @@ api.fxtwitter.com の元になっている公開プログラム（FxEmbed、MIT�
 | `add` | 170 | 1回で集める新しい会話の数 |
 | `searches` | 60 | 1回の実行で行う検索の回数の上限 |
 | `keep` | 500 | APIに残す会話の数 |
+| `posts` | 400 | マッチング用に残す投稿の数 |
+| `lines` | 300 | マッチング用に残す一言の数 |
 
 ## ファイル
 

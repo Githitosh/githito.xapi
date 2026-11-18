@@ -7,6 +7,11 @@ on:
     - cron: '0 3 * * *'    # 12:00 in Japan
     - cron: '0 9 * * *'    # 18:00 in Japan
   workflow_dispatch:
+    inputs:
+      rejudge:
+        description: 'Search nothing: only judge the saved data again by the rules as they are now'
+        type: boolean
+        default: false
 permissions:
   contents: write
 concurrency:
@@ -28,6 +33,7 @@ jobs:
       - name: Collect
         env:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node collect.mjs --out public
       - name: Publish (branch api, one commit, no history kept)
         run: |

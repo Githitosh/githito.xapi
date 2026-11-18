@@ -10,6 +10,7 @@
      node collect.mjs --langs ja,en   both languages
      node collect.mjs --add 40        stop after 40 new talks (170 unless told)
      node collect.mjs --dry           print the counts, write nothing
+     node collect.mjs --no-search     search nothing: judge what is saved again by the rules as they are now
 
    How the posts are found is set in config.json ("source"), or by XAPI_SOURCE:
      fxtwitter  Two stages, so that the unofficial service is asked as little as possible and cannot
@@ -58,6 +59,7 @@ const CONF = {
   hours: num('hours', 48),       // a talk leaves the API after this many hours
   pause: num('pause', 6000),     // milliseconds between two searches
   dry: flag('dry'),
+  noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1', // judge what is saved again with the rules as they are now; ask nothing
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -126,7 +128,7 @@ async function loveStage(lang, words) {
   let refusals = 0;
   let seen = 0;
   let passed = 0;
-  for (let n = 0; n < CONF.loveSearches && list.length; n++) {
+  for (let n = 0; !CONF.noSearch && n < CONF.loveSearches && list.length; n++) {
     const word = list[n % list.length];
     let got;
     try { got = await fx.posts(word, lang); searches++; refusals = 0; }
@@ -176,7 +178,7 @@ async function twoStages(lang, genres, any) {
   let gone = 0;
   /* For Matching News: the lines this run reads from X. */
   const lines = [];
-  for (let n = 0; n < CONF.searches && found.length < CONF.add; n++) {
+  for (let n = 0; !CONF.noSearch && n < CONF.searches && found.length < CONF.add; n++) {
     /* Stage 1: one search, with a word that belongs to no genre. */
     const word = words[n % words.length];
     let list;

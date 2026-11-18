@@ -38,7 +38,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost, loveSafe, loveFit, replySafe, sideOf, wishes, freeOf, sayOk, sayText, pairable, pairUp, lexiconWords } from './rules.mjs';
+import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost, loveSafe, loveFit, replySafe, sideOf, wishes, freeOf, sayOk, sayText, pairable, pairUp, lexiconWords, romanceWords, romanceSay } from './rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -61,6 +61,9 @@ const CONF = {
   loveSearches: FILE.loveSearches === 0 && !opt('lovesearches', '') ? 0 : num('lovesearches', FILE.loveSearches || 50),
   saySearches: num('saysearches', FILE.saySearches || 50), // searches of posts for short sayings (about 20 posts each)
   says: num('says', FILE.says || 800), // sayings Matching News' data holds
+  /* How many posts and replies one extra host (vxTwitter, FixupX) is asked for in a run. */
+  perHost: num('perhost', FILE.perHost || 2000),
+  extra: (Array.isArray(FILE.extra) ? FILE.extra : ['vxtwitter', 'fixupx']).map(s => String(s).toLowerCase()).filter(s => s === 'vxtwitter' || s === 'fixupx'),
   reads: num('reads', FILE.reads || 300), // posts X may return in one run (X charges for each)
   perWord: num('perword', 6),    // talks one word may give in a run
   hours: num('hours', 48),       // a talk leaves the API after this many hours
@@ -120,6 +123,38 @@ const fx = {
     return this.ask(`${word} filter:replies -filter:retweets lang:${lang} since_time:${until - 7200} until_time:${until}`);
   },
 };
+/* vxTwitter and FixupX do not search. FxTwitter search only finds the posts. The words that are kept
+   for a match are read again from these two, 2000 from each, then filtered and paired at random. */
+const decode = t => String(t || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+  .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d))).replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)));
+const meta = (html, prop) => {
+  const a = String(html || '').match(new RegExp(`<meta[^>]+property="${prop}"[^>]+content="([^"]*)"`, 'i'));
+  const b = String(html || '').match(new RegExp(`<meta[^>]+content="([^"]*)"[^>]+property="${prop}"`, 'i'));
+  return decode((a || b || [])[1] || '');
+};
+async function readVx(handle, id) {
+  const res = await fetch(`https://api.vxtwitter.com/${handle}/status/${id}`, { headers: { 'user-agent': 'githito.xapi collector', accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  if (!data || !data.tweetID || !data.text) return null;
+  return {
+    text: String(data.text).replace(/https?:\/\/\S+/g, '').trim(),
+    handle: data.user_screen_name || handle,
+    replyTo: data.replyingToID ? String(data.replyingToID) : '',
+    replyToHandle: data.replyingTo || '',
+  };
+}
+async function readFixup(handle, id) {
+  const res = await fetch(`https://fixupx.com/${handle}/status/${id}`, { headers: { 'user-agent': 'Discordbot/2.0', accept: 'text/html' }, redirect: 'follow', signal: AbortSignal.timeout(20000) });
+  if (!res.ok) return null;
+  const html = await res.text();
+  const title = meta(html, 'og:title');
+  const text = meta(html, 'og:description').replace(/https?:\/\/\S+/g, '').trim();
+  if (!text) return null;
+  const who = (title.match(/@([A-Za-z0-9_]{1,15})/) || [])[1] || handle;
+  return { text, handle: who, replyTo: '', replyToHandle: '' };
+}
+const readHost = { vxtwitter: readVx, fixupx: readFixup };
 /* A post or a reply read from X itself (its official embed API), as the plain record the rules read. */
 async function fromX(handle, id, replyTo) {
   const e = await readEmbed(handle, id);
@@ -200,16 +235,23 @@ async function readSay(c, lang) {
   const say = x ? sayOk({ ...c, raw: x.raw, user: { ...c.user, username: x.user.username, name: x.user.name || c.user.name } }, lang) : null;
   return say ? { ...say, to: c.replyTo || '' } : null;
 }
-async function sayStage(lang, lex) {
+async function sayStage(lang, lex, anyWords) {
   const says = [];
-  const list = shuffle(lexiconWords(lex));
-  const count = { gathered: 0, passed: 0, kept: 0 };
+  /* Find posts with FxTwitter (the only one of the three that searches). Words are drawn at random:
+     romance words, then everyday words, so the pool is not one topic. Odd searches are replies. */
+  const romance = lex && lex.romance ? romanceWords(lex) : lexiconWords(lex || {});
+  const list = shuffle([].concat(romance, anyWords || []));
+  const seen = new Set();
+  const pool = [];
+  const count = { gathered: 0, posts: 0, replies: 0, hosts: {} };
   let searches = 0;
   let refusals = 0;
-  for (let n = 0; !CONF.noSearch && n < CONF.saySearches && list.length; n++) {
+  for (let n = 0; !CONF.noSearch && n < CONF.saySearches && (count.posts < CONF.perHost || count.replies < CONF.perHost) && list.length; n++) {
     const word = list[n % list.length];
+    /* Replies until that side has 2000, then posts, so neither side is left thin. */
+    const replies = count.replies < CONF.perHost && (count.posts >= CONF.perHost || n % 2 === 1);
     let got;
-    try { got = await fx.any(word, lang); searches++; refusals = 0; }
+    try { got = replies ? await fx.search(word, lang) : await fx.any(word, lang); searches++; refusals = 0; }
     catch (e) {
       if (!(e instanceof Refused)) throw e;
       if (++refusals >= CONF.patience) { console.log(`  ${e.message}: stopping with what was found`); break; }
@@ -219,18 +261,41 @@ async function sayStage(lang, lex) {
       continue;
     }
     count.gathered += got.length;
-    const cands = got.map(p => ({ ...p, media: p.picture })).filter(p => sayOk(p, lang) && !says.some(x => x.id === p.id));
-    count.passed += cands.length;
+    got.forEach(p => {
+      if (!p.id || seen.has(p.id)) return;
+      seen.add(p.id);
+      pool.push({ ...p, media: p.picture });
+      if (p.replyTo) count.replies++; else count.posts++;
+    });
+    console.log(`  ${lang} find ${n + 1} "${word}" ${replies ? 'replies' : 'posts'}: ${got.length} (posts ${count.posts}, replies ${count.replies})`);
+    if (count.posts < CONF.perHost || count.replies < CONF.perHost) await sleep(CONF.pause);
+  }
+  /* Each host is asked for up to 2000 posts and 2000 replies, drawn at random. The safety filter runs after. */
+  for (const host of CONF.extra) {
+    const sample = shuffle(pool.filter(p => !p.replyTo)).slice(0, CONF.perHost).concat(shuffle(pool.filter(p => p.replyTo)).slice(0, CONF.perHost));
+    const read = readHost[host];
     let kept = 0;
-    for (let i = 0; i < cands.length; i += 4) {
-      const read4 = await Promise.all(cands.slice(i, i + 4).map(c => readSay(c, lang)));
-      read4.forEach(say => { if (say && !says.some(x => x.id === say.id)) { says.push({ ...say, found: stamp() }); kept++; } });
+    for (let i = 0; i < sample.length; i += 4) {
+      const batch = await Promise.all(sample.slice(i, i + 4).map(async c => {
+        let got;
+        try { got = await read(c.user.username, c.id); }
+        catch (e) { return null; }
+        if (!got || !got.text) return null;
+        const say = sayOk({ ...c, raw: got.text, user: { ...c.user, username: got.handle || c.user.username }, replyTo: got.replyTo || c.replyTo, replyToHandle: got.replyToHandle || c.replyToHandle }, lang);
+        if (!say) return null;
+        return { ...say, to: got.replyTo || c.replyTo || '', via: host, found: stamp() };
+      }));
+      batch.forEach(say => {
+        if (!say || says.some(x => x.id === say.id)) return;
+        says.push(say);
+        kept++;
+      });
     }
-    console.log(`  ${lang} saying search ${n + 1} "${word}": ${got.length} gathered, ${cands.length} pass filters 1 and 2, ${kept} pass filter 3 (${says.length} so far)`);
-    await sleep(CONF.pause);
+    count.hosts[host] = { read: sample.length, kept };
+    console.log(`  ${lang} ${host}: read ${sample.length}, ${kept} passed the filter (${says.length} sayings so far)`);
   }
   count.kept = says.length;
-  console.log(`  ${lang} sayings: ${searches} searches gathered ${count.gathered} -> filters 1 and 2 (whose account, may it play, short and its own) ${count.passed} -> filter 3 (read from X, judged again) ${count.kept}.`);
+  console.log(`  ${lang} sayings: ${searches} searches gathered ${count.gathered} (${count.posts} posts, ${count.replies} replies) -> ${CONF.extra.map(h => h + ' ' + ((count.hosts[h] && count.hosts[h].kept) || 0)).join(', ')} after the filter. ${says.length} sayings.`);
   STAGES[lang] = { ...(STAGES[lang] || {}), sayings: count };
   SAYS[lang] = says;
   return says;
@@ -394,7 +459,9 @@ async function matchOf(lang, genres, talks, source) {
     t.replies.forEach(r => addSay({ ...r, reply: true, to: t.post.id, found: t.found }));
   });
   lines.forEach(l => addSay({ ...l, reply: true, found: l.found }));
-  const kept = says.slice(0, CONF.says);
+  const love = shuffle(says.filter(s => romanceSay(s.text)));
+  const rest = shuffle(says.filter(s => !romanceSay(s.text)));
+  const kept = love.concat(rest).slice(0, CONF.says);
   const pairs = LEX[lang] ? pairUp(kept, LEX[lang], lang) : [];
   const kinds = {};
   pairs.forEach(p => { kinds[p.kind] = (kinds[p.kind] || 0) + 1; });
@@ -516,7 +583,7 @@ async function main() {
   for (const lang of (CONF.langs.length ? CONF.langs : ['ja'])) {
     console.log(src === fx ? `Collecting ${lang}: searches, this program's filter, words read from X` : `Collecting ${lang} from X's API`);
     LEX[lang] = (pairWords && pairWords[lang]) || null;
-    if (src === fx && LEX[lang]) await sayStage(lang, LEX[lang]);
+    if (src === fx && LEX[lang]) await sayStage(lang, LEX[lang], (any && any[lang]) || []);
     if (src === fx) NEW[lang] = { posts: CONF.loveSearches ? await loveStage(lang, (loveWords && loveWords[lang]) || [], (sheWords && sheWords[lang]) || []) : [], lines: [] };
     const out = src === fx ? await twoStages(lang, genres, (any && any[lang]) || []) : await collect(lang, genres, src);
     outs.push(out);
@@ -525,6 +592,6 @@ async function main() {
     if (!CONF.dry) { await writeApi(CONF.out, out, genres); await writeMatch(CONF.out, match); }
   }
   if (!CONF.dry) await writeIndex(CONF.out, src.name, outs, matches);
-  console.log(src === fx ? `Asked api.fxtwitter.com ${asked} times (replies with everyday words; posts with words of love). Read ${read} posts and replies from X's official embed API.` : `Asked X ${asked} times; X returned ${read} posts.`);
+  console.log(src === fx ? `Asked api.fxtwitter.com ${asked} times to find posts. Read conversations and replies from ${CONF.extra.join(' and ') || 'nowhere else'}, up to ${CONF.perHost} each, then paired at random. Read ${read} posts from X's official embed API for the talks.` : `Asked X ${asked} times; X returned ${read} posts.`);
 }
 main().catch(e => { console.error(e.message || e); process.exit(1); });

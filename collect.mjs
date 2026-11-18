@@ -237,10 +237,10 @@ async function readSay(c, lang) {
 }
 async function sayStage(lang, lex, anyWords) {
   const says = [];
-  /* Find posts with FxTwitter (the only one of the three that searches). Words are drawn at random:
-     romance words, then everyday words, so the pool is not one topic. Odd searches are replies. */
+  /* Find posts with FxTwitter (the only one of the three that searches). A romance lexicon is searched
+     with romance words only: everyday words such as ねむい were filling the pool. Odd searches are replies. */
   const romance = lex && lex.romance ? romanceWords(lex) : lexiconWords(lex || {});
-  const list = shuffle([].concat(romance, anyWords || []));
+  const list = shuffle(lex && lex.romance ? romance : [].concat(romance, anyWords || []));
   const seen = new Set();
   const pool = [];
   const count = { gathered: 0, posts: 0, replies: 0, hosts: {} };
@@ -461,7 +461,8 @@ async function matchOf(lang, genres, talks, source) {
   lines.forEach(l => addSay({ ...l, reply: true, found: l.found }));
   const love = shuffle(says.filter(s => romanceSay(s.text)));
   const rest = shuffle(says.filter(s => !romanceSay(s.text)));
-  const kept = love.concat(rest).slice(0, CONF.says);
+  /* Romance keeps sayings about love. Sleepy and everyday lines from the previous file are not carried over. */
+  const kept = (LEX[lang] && LEX[lang].romance ? love : love.concat(rest)).slice(0, CONF.says);
   const pairs = LEX[lang] ? pairUp(kept, LEX[lang], lang) : [];
   const kinds = {};
   pairs.forEach(p => { kinds[p.kind] = (kinds[p.kind] || 0) + 1; });

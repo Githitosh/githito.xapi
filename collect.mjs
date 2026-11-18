@@ -9,6 +9,10 @@
      node collect.mjs                 collect once into ./public (Japanese)
      node collect.mjs --langs ja,en   both languages
      node collect.mjs --add 40        stop after 40 new talks (170 unless told)
+   One run gathers about 2000 posts and replies (50 searches of posts about love and 50 of replies,
+   about 20 each) and puts them through three filters, counting what each lets by:
+     1. may it play, and whose account is it;  2. is it what is wanted (a person's own talk of love;
+     a reply with a punch or a reaction of a few words);  3. read from X itself and judged again.
      node collect.mjs --dry           print the counts, write nothing
      node collect.mjs --no-search     search nothing: judge what is saved again by the rules as they are now
 
@@ -34,7 +38,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost } from './rules.mjs';
+import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost, loveSafe, loveFit, replySafe } from './rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -52,12 +56,14 @@ const CONF = {
   keep: num('keep', FILE.keep || 500), // talks the API holds
   posts: num('posts', FILE.posts || 400), // posts Matching News' data holds
   lines: num('lines', FILE.lines || 300), // lines Matching News' data holds
-  searches: num('searches', FILE.searches || 60), // searches one run may make
-  loveSearches: num('lovesearches', FILE.loveSearches || 20), // of posts about love, for Matching News
+  searches: num('searches', FILE.searches || 50), // searches of replies one run may make (about 20 replies each)
+  loveSearches: num('lovesearches', FILE.loveSearches || 50), // searches of posts about love (about 20 posts each)
   reads: num('reads', FILE.reads || 300), // posts X may return in one run (X charges for each)
   perWord: num('perword', 6),    // talks one word may give in a run
   hours: num('hours', 48),       // a talk leaves the API after this many hours
   pause: num('pause', 6000),     // milliseconds between two searches
+  rest: num('rest', 120000),     // milliseconds to rest when a search is refused
+  patience: num('patience', 4),  // refusals in a row before a run stops searching
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1', // judge what is saved again with the rules as they are now; ask nothing
 };
@@ -124,29 +130,32 @@ async function fromX(handle, id, replyTo) {
 async function loveStage(lang, words) {
   const posts = [];
   const list = shuffle(words);
+  const count = { gathered: 0, filter1: 0, filter2: 0, filter3: 0 };
   let searches = 0;
   let refusals = 0;
-  let seen = 0;
-  let passed = 0;
   for (let n = 0; !CONF.noSearch && n < CONF.loveSearches && list.length; n++) {
     const word = list[n % list.length];
     let got;
     try { got = await fx.posts(word, lang); searches++; refusals = 0; }
     catch (e) {
       if (!(e instanceof Refused)) throw e;
-      if (++refusals >= 3) { console.log(`  ${e.message}: stopping with what was found`); break; }
-      console.log(`  ${e.message}: resting 90 seconds`);
-      await sleep(90000);
+      if (++refusals >= CONF.patience) { console.log(`  ${e.message}: stopping with what was found`); break; }
+      console.log(`  ${e.message}: resting two minutes`);
+      await sleep(CONF.rest);
+      n--;
       continue;
     }
-    seen += got.length;
-    const cands = got.map(p => ({ ...p, media: p.picture })).filter(p => !posts.some(x => x.handle.toLowerCase() === p.user.username.toLowerCase()) && lovePost(p, lang));
-    passed += cands.length;
+    count.gathered += got.length;
+    /* Filter 1: may it play, and whose account is it. Filter 2: is it a person's own talk about love. */
+    const safe1 = got.map(p => ({ ...p, media: p.picture })).filter(p => loveSafe(p, lang));
+    count.filter1 += safe1.length;
+    const cands = safe1.filter(p => loveFit(loveSafe(p, lang).text, lang) && !posts.some(x => x.handle.toLowerCase() === p.user.username.toLowerCase()));
+    count.filter2 += cands.length;
     let kept = 0;
+    /* Filter 3: X itself is asked for the post, and X's words go through filters 1 and 2 again. */
     for (let i = 0; i < cands.length; i += 4) {
       const read4 = await Promise.all(cands.slice(i, i + 4).map(async c => {
         const x = await fromX(c.user.username, c.id, '');
-        /* X's own words, with what the search told about the writer. */
         return x ? lovePost({ ...c, raw: x.raw, user: { ...c.user, username: x.user.username, name: x.user.name || c.user.name } }, lang) : null;
       }));
       read4.forEach(post => {
@@ -155,10 +164,12 @@ async function loveStage(lang, words) {
         kept++;
       });
     }
-    console.log(`  ${lang} love search ${n + 1} "${word}": ${got.length} posts, ${cands.length} pass the rules, ${kept} kept (${posts.length} so far)`);
+    console.log(`  ${lang} love search ${n + 1} "${word}": ${got.length} posts, ${safe1.length} pass filter 1, ${cands.length} pass filter 2, ${kept} pass filter 3 (${posts.length} so far)`);
     await sleep(CONF.pause);
   }
-  console.log(`  ${lang} matching posts: ${searches} searches gave ${seen} posts; ${passed} passed the rules; ${posts.length} read from X and kept.`);
+  count.filter3 = posts.length;
+  console.log(`  ${lang} posts about love: ${searches} searches gathered ${count.gathered} -> filter 1 (may it play, whose account) ${count.filter1} -> filter 2 (a person's own talk of love) ${count.filter2} -> filter 3 (read from X, judged again) ${count.filter3}.`);
+  STAGES[lang] = { ...(STAGES[lang] || {}), posts: count };
   return posts;
 }
 /* The two stages. */
@@ -176,6 +187,7 @@ async function twoStages(lang, genres, any) {
   let replies = 0;
   let passed = 0;
   let gone = 0;
+  let safe1 = 0;
   /* For Matching News: the lines this run reads from X. */
   const lines = [];
   for (let n = 0; !CONF.noSearch && n < CONF.searches && found.length < CONF.add; n++) {
@@ -185,12 +197,15 @@ async function twoStages(lang, genres, any) {
     try { list = await fx.search(word, lang); searches++; refusals = 0; }
     catch (e) {
       if (!(e instanceof Refused)) throw e;
-      if (++refusals >= 3) { console.log(`  ${e.message}: stopping with what was found`); break; }
-      console.log(`  ${e.message}: resting 90 seconds`);
-      await sleep(90000);
+      if (++refusals >= CONF.patience) { console.log(`  ${e.message}: stopping with what was found`); break; }
+      console.log(`  ${e.message}: resting two minutes`);
+      await sleep(CONF.rest);
+      n--;
       continue;
     }
     replies += list.length;
+    /* Filter 1: the writer may be shown and the words may play. */
+    safe1 += list.filter(r => replySafe(r, lang)).length;
     /* Stage 2, here: which replies have a punch, about a post not yet kept. */
     const cands = [];
     let alone = 0;
@@ -239,8 +254,8 @@ async function twoStages(lang, genres, any) {
   const talks = shuffle(found).concat(old.filter(t => young(t, CONF.hours) && stillOk(t))).slice(0, CONF.keep);
   const made = {};
   found.forEach(t => { made[t.genre] = (made[t.genre] || 0) + 1; });
-  console.log(`  ${lang} stage 1: ${searches} random searches gave ${replies} replies.`);
-  console.log(`  ${lang} stage 2: ${passed} passed the reply rules; ${found.length} became talks ${JSON.stringify(made)}; ${gone} were not shown by X. ${talks.length} talks in the API.`);
+  console.log(`  ${lang} replies: ${searches} random searches gathered ${replies} -> filter 1 (may it play, whose account) ${safe1} -> filter 2 (a reply with a punch, or a reaction of a few words) ${passed} -> filter 3 (reply and its post read from X, judged again) ${lines.length} lines, ${found.length} talks ${JSON.stringify(made)}; ${gone} were not shown by X. ${talks.length} talks in the API.`);
+  STAGES[lang] = { ...(STAGES[lang] || {}), replies: { gathered: replies, filter1: safe1, filter2: passed, filter3: { lines: lines.length, talks: found.length } } };
   NEW[lang] = { posts: (NEW[lang] && NEW[lang].posts) || [], lines };
   return { version: 1, lang, updated: stamp(), source: 'fxtwitter', count: talks.length, talks };
 }
@@ -252,6 +267,8 @@ async function twoStages(lang, genres, any) {
    the page never passes a real pair off as a match, nor a match as a real pair. Posts about politics
    are left out of the matching. */
 const NEW = {};
+/* What each filter let by in this run, for each language: written into the API beside the data. */
+const STAGES = {};
 async function matchOf(lang, genres, talks, source) {
   const before = await readJson(path.join(CONF.out, 'v1', `match-${lang}.json`), {});
   const fresh = x => Date.now() - Date.parse(x.found || 0) < CONF.hours * 3600e3;
@@ -280,7 +297,9 @@ async function matchOf(lang, genres, talks, source) {
   /* Earlier posts stay only when they were found as posts about love. */
   (Array.isArray(before.posts) ? before.posts : []).filter(p => fresh(p) && p.via === 'love').forEach(p => addPost(p, p.found));
   (Array.isArray(before.lines) ? before.lines : []).filter(fresh).forEach(l => addLine(l, l.found));
-  const out = { version: 1, lang, updated: stamp(), source, posts: posts.slice(0, CONF.posts), lines: lines.slice(0, CONF.lines).map(({ key, ...l }) => l) };
+  /* A run that searched nothing keeps the counts of the last run that did. */
+  const stages = CONF.noSearch || !STAGES[lang] ? (before.stages || null) : { at: stamp(), ...STAGES[lang] };
+  const out = { version: 1, lang, updated: stamp(), source, stages, posts: posts.slice(0, CONF.posts), lines: lines.slice(0, CONF.lines).map(({ key, ...l }) => l) };
   console.log(`  ${lang} matching: ${out.posts.length} posts and ${out.lines.length} lines (${out.lines.filter(l => !l.needs.length).length} of them can answer any post).`);
   return out;
 }

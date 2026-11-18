@@ -203,8 +203,16 @@ const PAIR = /\p{Extended_Pictographic}\p{Extended_Pictographic}[がはのをに
 const LECTURE = /男って|女って|男は|女は|男の(?:勘違い|本音|特徴)|女の(?:本音|特徴)|女性[がは]|男性[がは]|モテ|脈あり|脈なし|[■◆●▼✅👇☑]|[0-9０-９]+選|そう思ってた|気づけなかった|\\b(?:men are|women are|guys who|girls who)\\b/i;
 /* Does the text talk of love, in a life and not in a story? */
 export const loveText = (text, lang) => { const t = String(text || ''); return LOVE[lang].test(t) && !FICTION.test(t) && !SOLICIT.test(t) && !SCHOOL.test(t) && !NOT_SINGLE.test(t) && !BODILY.test(t) && !LECTURE.test(t) && !PAIR.test(t) && !DIALOGUE.test(t); };
-/* p: a post as the search told it (its writer's profile and numbers are known). null, or the post as it is saved. */
-export function lovePost(p, lang) {
+/* The filters a post about love goes through, one after the other. The collector counts what each lets by.
+   Filter 1, loveSafe: may it play at all, and is it an ordinary person's account? What may never play
+     (rules above), no hashtag, no picture, nothing of the body, no invitation, nothing pointing at
+     school age; an account more than a year old with a few hundred posts, neither tiny nor famous,
+     whose profile sells or seeks nothing.
+   Filter 2, loveFit: is it a person's own talk about love? It stands by itself, it speaks of a
+     boyfriend, a girlfriend or being in love, and it is not fiction, married life or a lecture.
+   Filter 3 is the collector's: the post is read from X itself, and X's words go through 1 and 2 again.
+   p: a post as the search told it (its writer's profile and numbers are known). */
+export function loveSafe(p, lang) {
   const u = p && p.user;
   if (!p || !u || /[#＃]/.test(p.raw) || p.media) return null;
   if (SHADY_BIO.test(String(u.description || '') + ' ' + String(u.name || '')) || SCHOOL.test(String(u.description || ''))) return null;
@@ -212,8 +220,21 @@ export function lovePost(p, lang) {
   if (!(days > 365) || !(u.statuses >= 300) || !(u.followers >= 30) || u.followers > 50000) return null;
   /* The rules for a post that opens a talk hold too; being answered is not asked of it. */
   const post = talkPost({ ...p, replies: Math.max(1, p.replies || 0) }, lang);
-  if (!post || !standsAlone(post.text, lang) || !loveText(post.text, lang)) return null;
+  if (!post || SOLICIT.test(post.text) || SCHOOL.test(post.text) || BODILY.test(post.text)) return null;
   return post;
+}
+export const loveFit = (text, lang) => standsAlone(text, lang) && loveText(text, lang);
+/* null, or the post as it is saved. */
+export function lovePost(p, lang) {
+  const post = loveSafe(p, lang);
+  return post && loveFit(post.text, lang) ? post : null;
+}
+/* Filter 1 for a reply, whatever it is wanted for: its writer may be shown and its words may play. */
+export function replySafe(p, lang) {
+  const u = p && p.user;
+  if (!p || !p.id || !u || !u.username || u.protected || minor(u) || SCHOOL.test(String(u.description || '')) || !p.replyTo) return false;
+  if (/^\s*(?:@\w+\s+)*[>＞]/.test(p.raw)) return false;
+  return safe(plain(p.raw), p);
 }
 /* A post that asks something. */
 export const asks = text => /[？?][\s\p{Extended_Pictographic}️]*$/u.test(String(text || '').trim());
@@ -295,7 +316,7 @@ export async function writeIndex(outDir, source, outs, matches) {
     out.talks.forEach(t => { genres[t.genre] = (genres[t.genre] || 0) + 1; });
     langs[out.lang] = { ...(langs[out.lang] || {}), updated: out.updated, count: out.talks.length, genres };
   });
-  (matches || []).forEach(m => { langs[m.lang] = { ...(langs[m.lang] || {}), match: { posts: m.posts.length, lines: m.lines.length } }; });
+  (matches || []).forEach(m => { langs[m.lang] = { ...(langs[m.lang] || {}), match: { posts: m.posts.length, lines: m.lines.length }, stages: m.stages || null }; });
   await writeFile(path.join(outDir, 'v1', 'index.json'), JSON.stringify({ version: 1, updated: stamp(), source, langs }, null, 1) + '\n');
   await writeFile(path.join(outDir, '.changed'), stamp() + '\n');
 }

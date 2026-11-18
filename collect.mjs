@@ -38,7 +38,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost, loveSafe, loveFit, replySafe, sideOf, wishes, freeOf, sayOk, sayText, pairable, pairUp, lexiconWords } from './rules.mjs';
+import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost, loveSafe, loveFit, replySafe, sideOf, wishes, freeOf, sayOk, sayText, pairable, pairUp, lexiconWords, romanceWords, romanceSay } from './rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -202,7 +202,9 @@ async function readSay(c, lang) {
 }
 async function sayStage(lang, lex) {
   const says = [];
-  const list = shuffle(lexiconWords(lex));
+  /* Romance first: words of a confession, an acceptance, a hint, or a reply that plays along.
+     Everyday words are not what Matching News pairs. */
+  const list = shuffle(lex && lex.romance ? romanceWords(lex) : lexiconWords(lex));
   const count = { gathered: 0, passed: 0, kept: 0 };
   let searches = 0;
   let refusals = 0;
@@ -394,7 +396,9 @@ async function matchOf(lang, genres, talks, source) {
     t.replies.forEach(r => addSay({ ...r, reply: true, to: t.post.id, found: t.found }));
   });
   lines.forEach(l => addSay({ ...l, reply: true, found: l.found }));
-  const kept = shuffle(says).slice(0, CONF.says);
+  const love = shuffle(says.filter(s => romanceSay(s.text)));
+  const rest = shuffle(says.filter(s => !romanceSay(s.text)));
+  const kept = love.concat(rest).slice(0, CONF.says);
   const pairs = LEX[lang] ? pairUp(kept, LEX[lang], lang) : [];
   const kinds = {};
   pairs.forEach(p => { kinds[p.kind] = (kinds[p.kind] || 0) + 1; });

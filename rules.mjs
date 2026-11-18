@@ -142,6 +142,10 @@ export function lineOf(text, lang) {
     if (!needs.includes(k)) needs.push(k);
   });
   if (needs.length > 2) return null;
+  /* What is left without the laughs and the marks. A line that may answer any post is a few words; a
+     longer one says something of its own, even in hiragana. */
+  const core = charLen(bare.replace(/笑+|草+|[wWｗＷ]+|[\s　、。，．,.!?！？…・〜～ー\-⁉‼()（）「」]+/g, ''));
+  if (core < 2 || core > (lang === 'en' ? (needs.length ? 40 : 24) : (needs.length ? 16 : 10))) return null;
   return { needs, kind: AGREE.test(t) ? 'agree' : 'react' };
 }
 /* A reply that can be such a line, as it is saved: its words, its writer, its own address, and the
@@ -185,7 +189,7 @@ const LOVE = {
 /* Not for a matching: married life and children, cheating, and anything of the body. */
 const NOT_SINGLE = /旦那|嫁|夫|妻|結婚|既婚|子供|子ども|こども|息子|娘|長女|次女|三女|長男|次男|三男|出産|妊娠|妊っ|産院|育児|ママ|パパ|離婚|不倫|浮気|\b(?:husband|wife|married|marriage|kids?|pregnan\w+|divorce\w*|cheat\w*|affair)\b/i;
 const BODILY = /車の中|ベッド|布団|風呂|シャワー|セクハラ|性的|ぎゅー|ぎゅっ|若い女|若い男|近親|下心|ワンナイト|お持ち帰り|体目的|体の関係|ホテル|泊ま|お泊|キス|ハグ|イチャ|いちゃ|添い寝|脱[がぎぐい]|胸|尻|フェチ|\b(?:kiss\w*|hook ?up|one night|hotel|bed)\b/i;
-const FICTION = /曲|ソング|歌詞|歌っ|新譜|アルバム|\\bMV\\b|主人公|ラブコメ|コント|両片思い|両片想い|BSS|[←→]|様|弊|周年|コス|衣装|ビジュ|社長|界隈|供給|尊い|てぇてぇ|解釈|腐|夢見|プリン|ばつ丸|サンリオ|キャラ|ＣＰ|\bCP\b|カプ|推し|二次創作|夢小説|夢主|夢女|受け|攻め|原作|アニメ|漫画|マンガ|ドラマ|映画|小説|ゲーム|配信|ライブ|アイドル|声優|俳優|女優|芸能|タレント|熱愛|メンバー|担当|ファン|イベント|ガチャ|実装|公式|妄想|設定|\b(?:ship|fanfic|anime|manga|character|episode|season|drama|movie|idol|fandom)\b/i;
+const FICTION = /曲|ソング|歌詞|歌っ|新譜|アルバム|\\bMV\\b|主人公|ラブコメ|コント|両片思い|両片想い|BSS|[←→]|様|弊|周年|コス|衣装|ビジュ|社長|界隈|供給|尊い|さにわ|審神者|てぇてぇ|解釈|腐|夢見|プリン|ばつ丸|サンリオ|キャラ|ＣＰ|\bCP\b|カプ|推し|二次創作|夢小説|夢主|夢女|受け|攻め|原作|アニメ|漫画|マンガ|ドラマ|映画|小説|ゲーム|配信|ライブ|アイドル|声優|俳優|女優|芸能|タレント|熱愛|メンバー|担当|ファン|イベント|ガチャ|実装|公式|妄想|設定|\b(?:ship|fanfic|anime|manga|character|episode|season|drama|movie|idol|fandom)\b/i;
 const SOLICIT = /募集|希望|誘っ|彼氏なし|彼女なし|恋人なし|フリーです|[^\s]\/[^\s]+\/|会える|会いたい人|会ってくれる|住み|近くの人|あたりの人|近い人|裏垢|サブ垢|別垢|鍵垢|セフ|せふ|ＤＭ|\bDM\b|LINE|ライン|カカオ|通話|フォロ|繋がり|つながり|いいね|RT|リポスト|プロフ|固ツイ|固定|保存して|\b(?:dm me|hmu|follow|link in bio|looking for)\b/i;
 const SHADY_BIO = /→\s*[@＠]|サブ|裏垢|別垢|過激|承認|会える|募集|希望|限定|\bDM\b|ＤＭ|LINE|出会い|パパ|ママ活|せふ|セフ|副業|稼|投資|占い|鑑定|相談|カウンセ|コーチ|講座|公式|アフィ|\bPR\b|婚活|恋愛(?:相談|コーチ|コンサル|アドバイ)|モテ|垢|\b(?:onlyfans|dating coach|dm for|18\+)\b/i;
 const SCHOOL = /修学旅行|学校|高校|中学|小学|大学[1１一]年|部活|先生|クラス|授業|テスト|受験|放課後|制服|担任|学年|[LSF]?JK|\bDK\b|\bJC\b|\b(?:school|class|teacher|homework|grade)\b/i;

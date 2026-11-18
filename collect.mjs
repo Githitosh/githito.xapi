@@ -11,11 +11,12 @@
      node collect.mjs --add 40        stop after 40 new talks (170 unless told)
      node collect.mjs --dry           print the counts, write nothing
 
-   Where the posts come from is set in config.json ("source"), or by XAPI_SOURCE:
+   The posts come from X's own API (v2, recent search), with the key X_BEARER_TOKEN. No other service is
+   asked. config.json ("source"), or XAPI_SOURCE, switches it:
      off        nothing is collected. This is how the repository starts.
-     official   X's own API v2. Needs the key X_BEARER_TOKEN.
-     fxtwitter  api.fxtwitter.com, a free service that searches X without a key.
-     auto       official when X_BEARER_TOKEN is set, otherwise off.
+     official   X's own API. Needs the key.
+     auto       official when the key is set, otherwise off.
+   X charges for every post it returns, so a run stops at a number of posts ("reads" in config.json).
    Node 20 or newer; no packages to install. */
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +37,7 @@ const CONF = {
   add: num('add', FILE.add || 170),    // new talks wanted from one run
   keep: num('keep', FILE.keep || 500), // talks the API holds
   searches: num('searches', 60), // searches one run may make
+  reads: num('reads', FILE.reads || 300), // posts X may return in one run (X charges for each)
   perWord: num('perword', 4),    // talks one word may give in a run
   hours: num('hours', 48),       // a talk leaves the API after this many hours
   pause: num('pause', 4000),     // milliseconds between two searches
@@ -139,48 +141,11 @@ function pickReplies(post, list, lang) {
 }
 
 /* ---------- where the posts come from ---------- */
-/* Both sources give the same plain record, so the rules above do not care which one answered. */
+/* X's answers are turned into a plain record, which is all the rules above look at. */
 let asked = 0;
+let read = 0;
 class Refused extends Error {}
 const iso = v => { const t = Date.parse(v); return Number.isFinite(t) ? new Date(t).toISOString().replace(/\.\d+Z$/, 'Z') : ''; };
-const fx = {
-  name: 'fxtwitter',
-  record(st) {
-    const a = (st && st.author) || {};
-    const v = (a.verification && a.verification.type) || '';
-    return {
-      id: String((st && st.id) || ''), raw: String((st && st.text) || ''),
-      user: { username: String(a.screen_name || ''), name: a.name || '', description: a.description || '', protected: !!a.protected, org: v === 'organization' || v === 'government', followers: a.followers || 0 },
-      replyTo: st && st.replying_to && st.replying_to.status ? String(st.replying_to.status) : '', isReply: !!(st && st.replying_to),
-      quote: !!(st && st.quote), repost: !!(st && st.reposted_by), replies: (st && st.replies) || 0, likes: (st && st.likes) || 0,
-      sensitive: !!(st && st.possibly_sensitive), media: !!(st && st.media && Object.keys(st.media).length), at: iso(st && st.created_at),
-    };
-  },
-  async get(pathname) {
-    asked++;
-    let res;
-    try { res = await fetch((process.env.XAPI_FX_BASE || 'https://api.fxtwitter.com') + pathname, { headers: { 'user-agent': 'githito.xapi collector' }, signal: AbortSignal.timeout(20000) }); }
-    catch (e) { return null; }
-    const data = await res.json().catch(() => null);
-    /* A search that is refused answers 404 (one that finds nothing answers 200 with no results). */
-    if (pathname.startsWith('/2/search') && (res.status !== 200 || (data && data.code && data.code !== 200))) throw new Refused('search refused (' + res.status + ')');
-    return res.ok ? data : null;
-  },
-  /* People's own posts about a word that someone answered; half the searches look at yesterday or the day before. */
-  async posts(word, lang) {
-    let range = '';
-    if (Math.random() < 0.5) {
-      const d = new Date(Date.now() - (1 + Math.floor(Math.random() * 2)) * 86400e3).toISOString().slice(0, 10);
-      range = ` since:${d} until:${new Date(Date.parse(d) + 86400e3).toISOString().slice(0, 10)}`;
-    }
-    const data = await this.get('/2/search?q=' + encodeURIComponent(`${word} -filter:replies -filter:retweets min_replies:2 lang:${lang}${range}`));
-    return ((data && data.results) || []).map(st => this.record(st));
-  },
-  async replies(id) {
-    const data = await this.get('/2/conversation/' + id);
-    return ((data && data.replies) || []).map(st => this.record(st));
-  },
-};
 const official = {
   name: 'official',
   fields: {
@@ -207,6 +172,7 @@ const official = {
     if (!res.ok) throw new Error(`X answered ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`);
     const data = await res.json();
     const users = new Map(((data.includes && data.includes.users) || []).map(u => [u.id, u]));
+    read += (data.data || []).length;
     return (data.data || []).map(t => this.record(t, users));
   },
   posts(word, lang) {
@@ -235,6 +201,7 @@ async function collect(lang, genres, src) {
   let refusals = 0;
   for (const { genre, word } of queue) {
     if (found.length >= CONF.add || searches >= CONF.searches) break;
+    if (read >= CONF.reads) { console.log(`  ${read} posts read: the run's limit (${CONF.reads}) is reached`); break; }
     let posts;
     try { posts = await src.posts(word, lang); searches++; refusals = 0; }
     catch (e) {
@@ -253,7 +220,7 @@ async function collect(lang, genres, src) {
     });
     cands.sort((a, b) => b.z - a.z);
     let got = 0;
-    for (let i = 0; i < cands.length && got < CONF.perWord && i < 8; i += 4) {
+    for (let i = 0; i < cands.length && got < CONF.perWord && i < 8 && read < CONF.reads; i += 4) {
       const batch = cands.slice(i, i + 4);
       const lists2 = await Promise.all(batch.map(c => src.replies(c.post.id).catch(e => { if (e instanceof Refused) return []; throw e; })));
       batch.forEach((c, k) => {
@@ -290,17 +257,17 @@ async function writeApi(out, genres) {
 async function main() {
   let name = CONF.source;
   if (name === 'auto') name = CONF.token ? 'official' : 'off';
-  if (name !== 'official' && name !== 'fxtwitter') {
-    console.log('The source is "' + CONF.source + '", so nothing was collected and no file was changed.\nSet "source" in config.json to official (with the key X_BEARER_TOKEN) or to fxtwitter. See README.md.');
+  if (name !== 'official') {
+    console.log('The source is "' + CONF.source + '", so nothing was collected and no file was changed.\nSet "source" in config.json to official and add the key X_BEARER_TOKEN. See README.md.');
     return;
   }
-  const src = name === 'official' ? official : fx;
-  if (src === official && !CONF.token) throw new Error('The source is official but X_BEARER_TOKEN is not set.');
+  const src = official;
+  if (!CONF.token) throw new Error('The source is official but X_BEARER_TOKEN is not set.');
   const { genres } = JSON.parse(await readFile(path.join(HERE, 'words.json'), 'utf8'));
   const index = await readJson(path.join(CONF.out, 'v1', 'index.json'), {});
   const langs = { ...(index.langs || {}) };
   for (const lang of (CONF.langs.length ? CONF.langs : ['ja'])) {
-    console.log(`Collecting ${lang} from ${src.name}`);
+    console.log(`Collecting ${lang} from X's API`);
     const out = await collect(lang, genres, src);
     const byGenre = {};
     out.talks.forEach(t => { byGenre[t.genre] = (byGenre[t.genre] || 0) + 1; });
@@ -313,6 +280,6 @@ async function main() {
     /* Tells the workflow that there is something new to publish. */
     await writeFile(path.join(CONF.out, '.changed'), stamp() + '\n');
   }
-  console.log(`Asked ${src.name} ${asked} times.`);
+  console.log(`Asked X ${asked} times; X returned ${read} posts.`);
 }
 main().catch(e => { console.error(e.message || e); process.exit(1); });

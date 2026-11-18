@@ -1,1 +1,13 @@
-{"source": "fxtwitter", "langs": ["ja"], "add": 170, "keep": 500, "searches": 40, "reads": 400, "loveSearches": 0, "saySearches": 60, "says": 2000}
+{
+  "source": "fxtwitter",
+  "langs": ["ja"],
+  "add": 170,
+  "keep": 500,
+  "searches": 40,
+  "reads": 400,
+  "loveSearches": 0,
+  "saySearches": 220,
+  "says": 2000,
+  "perHost": 2000,
+  "extra": ["vxtwitter", "fixupx"]
+}

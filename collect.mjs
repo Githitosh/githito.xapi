@@ -21,8 +21,9 @@
                    answers from X's official embed API (publish.x.com), keeps X's own words, and
                    sorts the talks into genres by what they say. The post a reply answers may
                    itself be part of a longer talk, and many talks belong to no genre ("other").
-                The same run also fills Matching News' data (v1/match-<lang>.json): the posts that can
-                open a talk, and the replies that bring no subject of their own (a laugh, a "really?"),
+                The same run also fills Matching News' data (v1/match-<lang>.json): people's own
+                posts about love, found by a few searches of posts with words of love (words.json,
+                "match"), and the replies that bring no subject of their own (a laugh, a "really?"),
                 so that the page can put a post beside a reply written to some other post.
      official   X's own API (v2, recent search). Needs the key X_BEARER_TOKEN; X charges for every post
                 it returns, so a run stops at a number of posts ("reads" in config.json).
@@ -32,7 +33,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch } from './rules.mjs';
+import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost } from './rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -51,6 +52,7 @@ const CONF = {
   posts: num('posts', FILE.posts || 400), // posts Matching News' data holds
   lines: num('lines', FILE.lines || 300), // lines Matching News' data holds
   searches: num('searches', FILE.searches || 60), // searches one run may make
+  loveSearches: num('lovesearches', FILE.loveSearches || 20), // of posts about love, for Matching News
   reads: num('reads', FILE.reads || 300), // posts X may return in one run (X charges for each)
   perWord: num('perword', 6),    // talks one word may give in a run
   hours: num('hours', 48),       // a talk leaves the API after this many hours
@@ -75,17 +77,14 @@ const fx = {
     const to = (st && st.replying_to) || {};
     return {
       id: String((st && st.id) || ''), raw: String((st && st.text) || ''),
-      user: { username: String(a.screen_name || ''), name: a.name || '', description: a.description || '', protected: !!a.protected, org: false, followers: a.followers || 0 },
+      user: { username: String(a.screen_name || ''), name: a.name || '', description: a.description || '', protected: !!a.protected, org: false, followers: a.followers || 0, statuses: a.statuses || 0, joined: iso(a.joined) },
       replyTo: to.status ? String(to.status) : '', replyToHandle: String(to.screen_name || ''), isReply: !!to.status,
       quote: !!(st && st.quote), repost: !!(st && st.reposted_by), replies: (st && st.replies) || 0, likes: (st && st.likes) || 0,
-      sensitive: !!(st && st.possibly_sensitive), media: false, at: iso(st && st.created_at),
+      sensitive: !!(st && st.possibly_sensitive), media: false, picture: !!(st && st.media && Object.keys(st.media).length), at: iso(st && st.created_at),
     };
   },
-  /* Replies that say the word, written in two hours drawn from the last two days. */
-  async search(word, lang) {
+  async ask(q) {
     asked++;
-    const until = Math.floor(Date.now() / 1000) - (1 + Math.floor(Math.random() * 46)) * 3600;
-    const q = `${word} filter:replies -filter:retweets lang:${lang} since_time:${until - 7200} until_time:${until}`;
     let res;
     try { res = await fetch((process.env.XAPI_FX_BASE || 'https://api.fxtwitter.com') + '/2/search?count=100&q=' + encodeURIComponent(q), { headers: { 'user-agent': 'githito.xapi collector' }, signal: AbortSignal.timeout(30000) }); }
     catch (e) { throw new Refused('search did not answer'); }
@@ -93,6 +92,16 @@ const fx = {
     /* A search that is refused answers 404 (one that finds nothing answers 200 with no results). */
     if (res.status !== 200 || (data && data.code && data.code !== 200)) throw new Refused('search refused (' + res.status + ')');
     return ((data && data.results) || []).map(st => this.record(st));
+  },
+  /* People's own posts (no replies, reposts or links) that say the word, written in two hours drawn from the last two days. */
+  posts(word, lang) {
+    const until = Math.floor(Date.now() / 1000) - (1 + Math.floor(Math.random() * 46)) * 3600;
+    return this.ask(`${word} -filter:replies -filter:retweets -filter:links lang:${lang} since_time:${until - 7200} until_time:${until}`);
+  },
+  /* Replies that say the word, written in two hours drawn from the last two days. */
+  search(word, lang) {
+    const until = Math.floor(Date.now() / 1000) - (1 + Math.floor(Math.random() * 46)) * 3600;
+    return this.ask(`${word} filter:replies -filter:retweets lang:${lang} since_time:${until - 7200} until_time:${until}`);
   },
 };
 /* A post or a reply read from X itself (its official embed API), as the plain record the rules read. */
@@ -105,6 +114,50 @@ async function fromX(handle, id, replyTo) {
     user: { username: e.handle, name: e.name, description: '', protected: false, org: false, followers: 0 },
     replyTo: replyTo || '', isReply: !!replyTo, quote: false, repost: false, replies: 1, likes: 0, sensitive: false, media: false, at: '',
   };
+}
+/* Matching News' posts: people's own posts about love. A few searches of posts with words of love; this
+   program's rules choose (rules.mjs, lovePost: no partner-seeking, no selling, no fiction, no school
+   age, an account that is old and ordinary); then the post is read from X itself and X's words are
+   judged again and saved. */
+async function loveStage(lang, words) {
+  const posts = [];
+  const list = shuffle(words);
+  let searches = 0;
+  let refusals = 0;
+  let seen = 0;
+  let passed = 0;
+  for (let n = 0; n < CONF.loveSearches && list.length; n++) {
+    const word = list[n % list.length];
+    let got;
+    try { got = await fx.posts(word, lang); searches++; refusals = 0; }
+    catch (e) {
+      if (!(e instanceof Refused)) throw e;
+      if (++refusals >= 3) { console.log(`  ${e.message}: stopping with what was found`); break; }
+      console.log(`  ${e.message}: resting 90 seconds`);
+      await sleep(90000);
+      continue;
+    }
+    seen += got.length;
+    const cands = got.map(p => ({ ...p, media: p.picture })).filter(p => !posts.some(x => x.handle.toLowerCase() === p.user.username.toLowerCase()) && lovePost(p, lang));
+    passed += cands.length;
+    let kept = 0;
+    for (let i = 0; i < cands.length; i += 4) {
+      const read4 = await Promise.all(cands.slice(i, i + 4).map(async c => {
+        const x = await fromX(c.user.username, c.id, '');
+        /* X's own words, with what the search told about the writer. */
+        return x ? lovePost({ ...c, raw: x.raw, user: { ...c.user, username: x.user.username, name: x.user.name || c.user.name } }, lang) : null;
+      }));
+      read4.forEach(post => {
+        if (!post || posts.some(x => x.id === post.id || x.handle.toLowerCase() === post.handle.toLowerCase())) return;
+        posts.push({ ...post, genre: 'romance', word: word.replace(/[がにとの]$/, ''), found: stamp() });
+        kept++;
+      });
+    }
+    console.log(`  ${lang} love search ${n + 1} "${word}": ${got.length} posts, ${cands.length} pass the rules, ${kept} kept (${posts.length} so far)`);
+    await sleep(CONF.pause);
+  }
+  console.log(`  ${lang} matching posts: ${searches} searches gave ${seen} posts; ${passed} passed the rules; ${posts.length} read from X and kept.`);
+  return posts;
 }
 /* The two stages. */
 async function twoStages(lang, genres, any) {
@@ -121,8 +174,7 @@ async function twoStages(lang, genres, any) {
   let replies = 0;
   let passed = 0;
   let gone = 0;
-  /* For Matching News: the posts and the lines this run reads from X. */
-  const posts = [];
+  /* For Matching News: the lines this run reads from X. */
   const lines = [];
   for (let n = 0; n < CONF.searches && found.length < CONF.add; n++) {
     /* Stage 1: one search, with a word that belongs to no genre. */
@@ -168,7 +220,6 @@ async function twoStages(lang, genres, any) {
       }));
       pairs.forEach(t => {
         if (!t) return;
-        if (t.post && !posts.some(x => x.id === t.post.id || x.handle.toLowerCase() === t.post.handle.toLowerCase())) posts.push({ ...t.post, found: stamp() });
         if (t.line && !lines.some(x => x.id === t.line.id)) lines.push({ ...t.line, found: stamp() });
         if (!t.post || !t.replies.length) return;
         if (found.length >= CONF.add || have.has(t.post.id) || people.has(t.post.handle.toLowerCase())) return;
@@ -188,13 +239,13 @@ async function twoStages(lang, genres, any) {
   found.forEach(t => { made[t.genre] = (made[t.genre] || 0) + 1; });
   console.log(`  ${lang} stage 1: ${searches} random searches gave ${replies} replies.`);
   console.log(`  ${lang} stage 2: ${passed} passed the reply rules; ${found.length} became talks ${JSON.stringify(made)}; ${gone} were not shown by X. ${talks.length} talks in the API.`);
-  NEW[lang] = { posts, lines };
+  NEW[lang] = { posts: (NEW[lang] && NEW[lang].posts) || [], lines };
   return { version: 1, lang, updated: stamp(), source: 'fxtwitter', count: talks.length, talks };
 }
 /* ---------- Matching News' data ---------- */
-/* Two lists: posts that can open a talk, and lines that can answer a post they were not written to
-   (rules.mjs, lineOf). They come from what this run read from X, from the talks in the API, and from
-   the lists saved before, as long as they are young. The page draws a post and a line at random and
+/* Two lists: people's posts about love (loveStage), and lines that can answer a post they were not
+   written to (rules.mjs, lineOf). The posts come from this run and from the list saved before; the
+   lines also from the talks in the API; all as long as they are young. The page draws a post and a line at random and
    shows them together, with both addresses; which post a line was really written to is kept ("to"), so
    the page never passes a real pair off as a match, nor a match as a real pair. Posts about politics
    are left out of the matching. */
@@ -211,8 +262,7 @@ async function matchOf(lang, genres, talks, source) {
   const political = text => { const t = String(text || '').toLowerCase(); return polWords.some(w => t.includes(w)); };
   const addPost = (p, found) => {
     if (!postOk(p, lang) || political(p.text) || posts.some(x => x.id === p.id || x.handle.toLowerCase() === p.handle.toLowerCase())) return;
-    const g = genreOf(p.text, lang, genres);
-    posts.push({ id: p.id, handle: p.handle, text: p.text, url: p.url, at: p.at || '', genre: g.genre, word: g.word, asks: asks(p.text), found });
+    posts.push({ id: p.id, handle: p.handle, text: p.text, url: p.url, at: p.at || '', genre: 'romance', word: p.word || '', asks: asks(p.text), via: 'love', found });
   };
   const addLine = (l, found) => {
     if (!l || !l.id || !l.handle || !l.to || !cleanText(l.text)) return;
@@ -223,12 +273,10 @@ async function matchOf(lang, genres, talks, source) {
   };
   shuffle(now.posts).forEach(p => addPost(p, p.found));
   shuffle(now.lines).forEach(l => addLine(l, l.found));
-  /* The talks in the API (not the ones sent by hand: those were chosen as a pair). */
-  talks.filter(t => !t.manual).forEach(t => {
-    addPost(t.post, t.found);
-    t.replies.forEach(r => addLine({ ...r, to: t.post.id, toHandle: t.post.handle }, t.found));
-  });
-  (Array.isArray(before.posts) ? before.posts : []).filter(fresh).forEach(p => addPost(p, p.found));
+  /* Lines also from the talks in the API (not the ones sent by hand: those were chosen as a pair). */
+  talks.filter(t => !t.manual).forEach(t => t.replies.forEach(r => addLine({ ...r, to: t.post.id, toHandle: t.post.handle }, t.found)));
+  /* Earlier posts stay only when they were found as posts about love. */
+  (Array.isArray(before.posts) ? before.posts : []).filter(p => fresh(p) && p.via === 'love').forEach(p => addPost(p, p.found));
   (Array.isArray(before.lines) ? before.lines : []).filter(fresh).forEach(l => addLine(l, l.found));
   const out = { version: 1, lang, updated: stamp(), source, posts: posts.slice(0, CONF.posts), lines: lines.slice(0, CONF.lines).map(({ key, ...l }) => l) };
   console.log(`  ${lang} matching: ${out.posts.length} posts and ${out.lines.length} lines (${out.lines.filter(l => !l.needs.length).length} of them can answer any post).`);
@@ -338,11 +386,12 @@ async function main() {
   }
   const src = name === 'official' ? official : fx;
   if (src === official && !CONF.token) throw new Error('The source is official but X_BEARER_TOKEN is not set.');
-  const { genres, any } = JSON.parse(await readFile(path.join(HERE, 'words.json'), 'utf8'));
+  const { genres, any, match: loveWords } = JSON.parse(await readFile(path.join(HERE, 'words.json'), 'utf8'));
   const outs = [];
   const matches = [];
   for (const lang of (CONF.langs.length ? CONF.langs : ['ja'])) {
-    console.log(src === fx ? `Collecting ${lang}: random searches, this program's filter, words read from X` : `Collecting ${lang} from X's API`);
+    console.log(src === fx ? `Collecting ${lang}: searches, this program's filter, words read from X` : `Collecting ${lang} from X's API`);
+    if (src === fx) NEW[lang] = { posts: await loveStage(lang, (loveWords && loveWords[lang]) || []), lines: [] };
     const out = src === fx ? await twoStages(lang, genres, (any && any[lang]) || []) : await collect(lang, genres, src);
     outs.push(out);
     const match = await matchOf(lang, genres, out.talks, src.name);
@@ -350,6 +399,6 @@ async function main() {
     if (!CONF.dry) { await writeApi(CONF.out, out, genres); await writeMatch(CONF.out, match); }
   }
   if (!CONF.dry) await writeIndex(CONF.out, src.name, outs, matches);
-  console.log(src === fx ? `Asked api.fxtwitter.com ${asked} times (random searches only). Read ${read} posts and replies from X's official embed API.` : `Asked X ${asked} times; X returned ${read} posts.`);
+  console.log(src === fx ? `Asked api.fxtwitter.com ${asked} times (replies with everyday words; posts with words of love). Read ${read} posts and replies from X's official embed API.` : `Asked X ${asked} times; X returned ${read} posts.`);
 }
 main().catch(e => { console.error(e.message || e); process.exit(1); });

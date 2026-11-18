@@ -7,8 +7,8 @@ export async function readJson(file, empty) { try { return JSON.parse(await read
 
 /* ---------- what may play ---------- */
 const VIOLENT = /murder|stabbed|shot dead|shooting|killed|beheading|homicide|massacre|rape|sexual assault|robbery|凶悪|殺人|殺害|刺殺|遺体|刺され|死傷|銃乱射|暴行|強盗|レイプ|強姦/i;
-const HEAVY = /(?:^|[^必])死(?!ぬほど|ぬかと|んだ笑)|亡くな|遺体|事故|災害|震災|地震|津波|火災|病気|闘病|入院|がん(?!ば|が)|癌|自殺|自死|いじめ|虐待|差別|\bdied\b|\bdeath\b|\bcrash\b|\bdisaster\b|\bcancer\b|\bsuicide\b|\bbull(?:y|ied|ying)\b|\bracis/i;
-const SUGGESTIVE = /🔞|🍆|🍑|😏|💋|👅|寝かさない|抱いて|抱かれ|夜這い|ベッドで|一緒にお風呂|色っぽ|セクシー|えちえち|\bsexy\b|\bspicy\b|\bnaughty\b|\bin bed\b|(?<!ア)マゾ(?!ン)|ドM|ドＭ|ドS|ドＳ|変態|ヘンタイ|\bkink|赤ちゃんプレイ|[SＳMＭ]プレイ/i;
+const HEAVY = /(?:^|[^必])死(?!ぬほど|ぬかと|んだ笑)|亡くな|遺体|事故|災害|震災|地震|津波|火災|病気|闘病|入院|がん(?!ば|が)|癌|自殺|自死|いじめ|虐待|差別|ご冥福|追悼|\\brest in peace\\b|\\bRIP\\b|\bdied\b|\bdeath\b|\bcrash\b|\bdisaster\b|\bcancer\b|\bsuicide\b|\bbull(?:y|ied|ying)\b|\bracis/i;
+const SUGGESTIVE = /🔞|🍆|🍑|😏|💋|👅|いやらし|やらしい|寝かさない|抱いて|抱かれ|夜這い|ベッドで|一緒にお風呂|色っぽ|セクシー|えちえち|\bsexy\b|\bspicy\b|\bnaughty\b|\bin bed\b|(?<!ア)マゾ(?!ン)|ドM|ドＭ|ドS|ドＳ|変態|ヘンタイ|\bkink|赤ちゃんプレイ|[SＳMＭ]プレイ/i;
 const ADULT = /セックス|エッチ|えっち|ｴｯﾁ|エロ|下ネタ|ヤる|ヤれ|体位|下着|裸|おっぱい|乳首|ちんこ|ちんちん|まんこ|射精|中出し|勃起|ムラムラ|性欲|童貞|処女|ラブホ|\bsex|nsfw|nude|naked|horny|kinky/i;
 const NEVER = /ヤリモク|風俗|パパ活|ママ活|援交|AV女優|アダルト|porn|onlyfans|中学|小学|ＪＫ|ＪＣ|ＪＳ|\bJ[KCS]\b|高校生|女子高生|男子高生|未成年|ロリ|ショタ|\bteen|high school|middle school|underage|\bloli|\bshota|ＤＶ|\bDV\b|モラハラ|殴られ|abuse|レイプ|強姦|無理やり|盗撮|痴漢/i;
 const UNSAFE = new RegExp(ADULT.source + '|' + NEVER.source, 'i');
@@ -148,7 +148,7 @@ export function lineOf(text, lang) {
    post it was really written to. */
 export function pickLine(p, lang) {
   const u = p && p.user;
-  if (!p || !p.id || !u || !u.username || u.protected || minor(u) || !p.replyTo) return null;
+  if (!p || !p.id || !u || !u.username || u.protected || minor(u) || SCHOOL.test(String(u.description || '')) || !p.replyTo) return null;
   if (/^\s*(?:@\w+\s+)*[>＞]/.test(p.raw)) return null;
   const text = plain(p.raw);
   if (!safe(text, p) || POLITE.test(text) && !isFunny(text, lang)) return null;
@@ -167,6 +167,41 @@ export function standsAlone(text, lang) {
   const t = String(text || '').trim();
   if (charLen(t) < (lang === 'en' ? 24 : 16)) return false;
   return !THANKS.test(t) && !BACK.test(t) && !NAMED_FIRST.test(t) && !ME_TOO.test(t) && !/^\s*[【\[［]/.test(t);
+}
+/* ---------- matching: a person's own post about love ---------- */
+/* Matching News matches posts about love only. A search for such words also brings partner-seeking
+   spam, advice sellers and talk about fictional couples, so a post is kept only when:
+   - it talks of a boyfriend, a girlfriend or of being in love, in the writer's own life (LOVE), not of
+     characters (FICTION), nor of married life, children or cheating (NOT_SINGLE), nor of the body (BODILY);
+   - it asks nobody to meet, follow or write (SOLICIT), has no hashtag and no picture;
+   - its writer's account is more than a year old, has posted a few hundred times, is neither tiny nor
+     famous, and its profile sells or seeks nothing (SHADY_BIO);
+   - nothing in the post or the profile points at school age (SCHOOL), beside the rules for minors above. */
+const LOVE = {
+  /* 彼女 also means "she", so it counts only where it reads as a girlfriend. */
+  ja: /彼氏|(?:俺|僕|おれ|ぼく|自分|私|うち)の彼女|彼女(?:でき|ほし|欲し|いな|おら|持ち|と(?:デート|付き合|同棲|別れ|会|電話|遊|出かけ|旅行|ご飯|飯)|に(?:振られ|フラれ|ふられ|会|怒られ|プレゼント|言われ)|が(?:可愛|かわい|好き|作っ|くれ|怒|欲し|ほし|でき|い)|から|の(?:手料理|誕生日|プレゼント|家))|恋人|片思い|片想い|両思い|両想い|好きな人|デート|記念日|同棲|告白|付き合(?:う|っ|い|え)|恋愛|失恋|元カレ|元カノ|元彼|恋し(?:た|て)|恋バナ|遠距離|惚れ/,
+  en: /\b(?:boyfriend|girlfriend|crush|date|dating|anniversary|in love|my ex|single)\b/i,
+};
+/* Not for a matching: married life and children, cheating, and anything of the body. */
+const NOT_SINGLE = /旦那|嫁|夫|妻|結婚|既婚|子供|子ども|こども|息子|娘|長女|次女|三女|長男|次男|三男|出産|妊娠|妊っ|産院|育児|ママ|パパ|離婚|不倫|浮気|\b(?:husband|wife|married|marriage|kids?|pregnan\w+|divorce\w*|cheat\w*|affair)\b/i;
+const BODILY = /セクハラ|性的|ぎゅー|ぎゅっ|若い女|若い男|近親|下心|ワンナイト|お持ち帰り|体目的|体の関係|ホテル|泊ま|お泊|キス|ハグ|イチャ|いちゃ|添い寝|脱[がぎぐい]|胸|尻|フェチ|\b(?:kiss\w*|hook ?up|one night|hotel|bed)\b/i;
+const FICTION = /キャラ|ＣＰ|\bCP\b|カプ|推し|二次創作|夢小説|夢主|夢女|受け|攻め|原作|アニメ|漫画|マンガ|ドラマ|映画|小説|ゲーム|配信|ライブ|アイドル|声優|俳優|女優|芸能|タレント|熱愛|メンバー|担当|ファン|イベント|ガチャ|実装|公式|妄想|設定|\b(?:ship|fanfic|anime|manga|character|episode|season|drama|movie|idol|fandom)\b/i;
+const SOLICIT = /募集|希望|誘っ|彼氏なし|彼女なし|恋人なし|フリーです|[^\s]\/[^\s]+\/|会える|会いたい人|会ってくれる|住み|近くの人|あたりの人|近い人|裏垢|サブ垢|別垢|鍵垢|セフ|せふ|ＤＭ|\bDM\b|LINE|ライン|カカオ|通話|フォロ|繋がり|つながり|いいね|RT|リポスト|プロフ|固ツイ|固定|保存して|\b(?:dm me|hmu|follow|link in bio|looking for)\b/i;
+const SHADY_BIO = /→\s*[@＠]|サブ|裏垢|別垢|過激|承認|会える|募集|希望|限定|\bDM\b|ＤＭ|LINE|出会い|パパ|ママ活|せふ|セフ|副業|稼|投資|占い|鑑定|相談|カウンセ|コーチ|講座|公式|アフィ|\bPR\b|婚活|恋愛(?:相談|コーチ|コンサル|アドバイ)|モテ|垢|\b(?:onlyfans|dating coach|dm for|18\+)\b/i;
+const SCHOOL = /学校|高校|中学|小学|大学[1１一]年|部活|先生|クラス|授業|テスト|受験|放課後|制服|担任|学年|[LSF]?JK|\bDK\b|\bJC\b|\b(?:school|class|teacher|homework|grade)\b/i;
+/* Does the text talk of love, in a life and not in a story? */
+export const loveText = (text, lang) => { const t = String(text || ''); return LOVE[lang].test(t) && !FICTION.test(t) && !SOLICIT.test(t) && !SCHOOL.test(t) && !NOT_SINGLE.test(t) && !BODILY.test(t); };
+/* p: a post as the search told it (its writer's profile and numbers are known). null, or the post as it is saved. */
+export function lovePost(p, lang) {
+  const u = p && p.user;
+  if (!p || !u || /[#＃]/.test(p.raw) || p.media) return null;
+  if (SHADY_BIO.test(String(u.description || '') + ' ' + String(u.name || '')) || SCHOOL.test(String(u.description || ''))) return null;
+  const days = (Date.now() - Date.parse(u.joined || 0)) / 86400e3;
+  if (!(days > 365) || !(u.statuses >= 300) || !(u.followers >= 30) || u.followers > 50000) return null;
+  /* The rules for a post that opens a talk hold too; being answered is not asked of it. */
+  const post = talkPost({ ...p, replies: Math.max(1, p.replies || 0) }, lang);
+  if (!post || !standsAlone(post.text, lang) || !loveText(post.text, lang)) return null;
+  return post;
 }
 /* A post that asks something. */
 export const asks = text => /[？?][\s\p{Extended_Pictographic}️]*$/u.test(String(text || '').trim());
@@ -256,7 +291,7 @@ export async function writeIndex(outDir, source, outs, matches) {
    what is already in the API. Talks sent by hand were chosen by the owner and stay. */
 export const cleanText = t => !!t && !UNSAFE.test(t) && !VIOLENT.test(t) && !HEAVY.test(t) && !SUGGESTIVE.test(t) && !TOXIC.test(t);
 /* A post in Matching News' data is judged again the same way. */
-export const postOk = (p, lang) => !!p && !!p.id && !!p.handle && cleanText(p.text) && !GLOOM.test(p.text) && !AD.test(p.text) && !OFFICIAL.test(p.handle) && standsAlone(p.text, lang);
+export const postOk = (p, lang) => !!p && !!p.id && !!p.handle && cleanText(p.text) && !GLOOM.test(p.text) && !AD.test(p.text) && !OFFICIAL.test(p.handle) && standsAlone(p.text, lang) && loveText(p.text, lang);
 export const stillOk = t => !!t.manual || (cleanText(t.post.text) && !OFFICIAL.test(t.post.handle) && t.replies.every(r => cleanText(r.text)));
 /* How long a talk stays: two days when collected, two weeks when sent by hand. */
 export const young = (t, hours) => Date.now() - Date.parse(t.found || 0) < (t.manual ? 14 * 24 : hours) * 3600e3;

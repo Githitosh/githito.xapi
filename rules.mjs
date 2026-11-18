@@ -183,16 +183,18 @@ export function standsAlone(text, lang) {
    - its writer's account is more than a year old, has posted a few hundred times, is neither tiny nor
      famous, and its profile sells or seeks nothing (SHADY_BIO);
    - nothing in the post or the profile points at school age (SCHOOL), beside the rules for minors above. */
+/* 彼女 also means "she": it counts as a girlfriend only where it reads so. */
+const GIRLFRIEND = '(?:俺|僕|おれ|ぼく|自分|私|うち)の彼女|彼女(?:さん)?(?:(?:が|は|も|を)?(?:でき|ほし|欲し|いな|おら|作り|つくり)|持ち|と(?:デート|付き合|同棲|別れ|会|電話|通話|遊|出かけ|旅行|ご飯|飯|過ご|行っ|行く|行き|食べ|観|見に|住|暮ら|喧嘩|仲直り)|に(?:振られ|フラれ|ふられ|会|怒られ|プレゼント|言われ|作っ|あげ|渡)|が(?:可愛|かわい|好き|作っ|くれ|怒|欲し|ほし|でき|い)|を(?:作|つく|大事|大切|幸せ|喜ば|迎え)|から|の(?:手料理|誕生日|プレゼント|家|ため))|元カノ|初彼女';
 const LOVE = {
   /* 彼女 also means "she", so it counts only where it reads as a girlfriend. */
-  ja: /彼氏|(?:俺|僕|おれ|ぼく|自分|私|うち)の彼女|彼女(?:でき|ほし|欲し|いな|おら|持ち|と(?:デート|付き合|同棲|別れ|会|電話|遊|出かけ|旅行|ご飯|飯)|に(?:振られ|フラれ|ふられ|会|怒られ|プレゼント|言われ)|が(?:可愛|かわい|好き|作っ|くれ|怒|欲し|ほし|でき|い)|から|の(?:手料理|誕生日|プレゼント|家))|恋人(?!達|たち)|片思い|片想い|好きな人|デート|同棲|告白(?:され|した|して|する|でき)|付き合って(?:る|た|ない|から|いる|いた|ほし|欲し|ください)|付き合(?:い始め|いたて|うことに|いたい|えた|える)|恋愛|失恋|元カレ|元カノ|元彼|恋し(?:た|て)|恋バナ|遠距離恋愛|惚れ/,
+  ja: new RegExp('彼氏|彼ピ|' + GIRLFRIEND + '|恋人(?!達|たち)|片思い|片想い|好きな人|デート|同棲|告白(?:され|した|して|する|でき)|付き合って(?:る|た|ない|から|いる|いた|ほし|欲し|ください)|付き合(?:い始め|いたて|うことに|いたい|えた|える)|恋愛|失恋|元カレ|元彼|恋し(?:た|て)|恋バナ|遠距離恋愛|惚れ'),
   en: /\b(?:boyfriend|girlfriend|crush|date|dating|anniversary|in love|my ex|single)\b/i,
 };
 /* Not for a matching: married life and children, cheating, and anything of the body. */
 const NOT_SINGLE = /子持ち|家庭|旦那|嫁|夫|妻|結婚|既婚|子供|子ども|こども|息子|娘|長女|次女|三女|長男|次男|三男|出産|妊娠|妊っ|産院|育児|ママ|パパ|離婚|不倫|浮気|\b(?:husband|wife|married|marriage|kids?|pregnan\w+|divorce\w*|cheat\w*|affair)\b/i;
 const BODILY = /第二ラウンド|ラウンド|経験人数|NTR|NTり|ＮＴＲ|寝取|女体|男体|ホスト|キャバ|クソ客|[^お]客|身体|カラダ|疼|触れられ|触られ|感覚を思い出|火照|濡れ|敏感|欲求|欲しがる|興奮|舐め|揉[まみむ]|肌|唇|首筋|耳元|吐息|抱きしめ|抱い[てた]|押し倒|襲[わっ]|我慢でき|夜になると|おじさん|車の中|ベッド|布団|風呂|シャワー|セクハラ|性的|ぎゅー|ぎゅっ|若い女|若い男|近親|下心|ワンナイト|お持ち帰り|体目的|体の関係|ホテル|泊ま|お泊|キス|ハグ|イチャ|いちゃ|添い寝|脱[がぎぐい]|胸|尻|フェチ|\b(?:kiss\w*|hook ?up|one night|hotel|bed)\b/i;
 const FICTION = /描[かきくけこい]|物語|エピ|[0-9０-９]+話|読ませ|シーモア|\bMOD\b|敵|ＶＴ|\bVT\b|経験値|\bIEI\b|MBTI|㌧|[ｦ-ﾟ]{2,}|作品|彼氏面|彼女面|トモコレ|曲|ソング|歌詞|歌っ|新譜|アルバム|\bMV\b|主人公|ラブコメ|コント|両片思い|両片想い|BSS|[←→]|様|弊|周年|コス|衣装|ビジュ|社長|界隈|供給|尊い|さにわ|審神者|てぇてぇ|解釈|腐|夢見|プリン|ばつ丸|サンリオ|キャラ|ＣＰ|\bCP\b|カプ|推し|二次創作|夢小説|夢主|夢女|受け|攻め|原作|アニメ|漫画|マンガ|ドラマ|映画|小説|ゲーム|配信|ライブ|アイドル|声優|俳優|女優|芸能|タレント|熱愛|メンバー|担当|ファン|イベント|ガチャ|実装|公式|妄想|設定|\b(?:ship|fanfic|anime|manga|character|episode|season|drama|movie|idol|fandom)\b/i;
-const SOLICIT = /募集|希望|誘っ|彼氏なし|彼女なし|恋人なし|フリーです|[^\s]\/[^\s]+\/|会える|会いたい人|会ってくれる|住み|近くの人|あたりの人|近い人|裏垢|サブ垢|別垢|鍵垢|セフ|せふ|ＤＭ|\bDM\b|LINE|ライン|カカオ|通話|フォロ|繋がり|つながり|いいね|RT|リポスト|プロフ|固ツイ|固定|保存して|\b(?:dm me|hmu|follow|link in bio|looking for)\b/i;
+const SOLICIT = /募集|希望|誘っ|彼氏なし|彼女なし|恋人なし|フリーです|[^\s]\/[^\s]+\/|会える(?:人|方|子|男|女)|会えます|会いたい人|会ってくれる|住み|近くの人|あたりの人|近い人|裏垢|サブ垢|別垢|鍵垢|セフ|せふ|ＤＭ|\bDM\b|LINE|ライン|カカオ|通話|フォロ|繋がり|つながり|いいね|RT|リポスト|プロフ|固ツイ|固定|保存して|\b(?:dm me|hmu|follow|link in bio|looking for)\b/i;
 const SHADY_BIO = /→\s*[@＠]|サブ|裏垢|別垢|過激|承認|会える|募集|希望|限定|\bDM\b|ＤＭ|LINE|出会い|パパ|ママ活|せふ|セフ|副業|稼|投資|占い|鑑定|相談|カウンセ|コーチ|講座|公式|アフィ|\bPR\b|婚活|恋愛(?:相談|コーチ|コンサル|アドバイ)|モテ|垢|\b(?:onlyfans|dating coach|dm for|18\+)\b/i;
 const SCHOOL = /ハイスクール|学生|修学旅行|学校|高校|中学|小学|大学[1１一]年|部活|先生|クラス|授業|テスト|受験|放課後|制服|担任|学年|[LSF]?JK|\bDK\b|\bJC\b|\b(?:school|class|teacher|homework|grade)\b/i;
 /* Somebody named: a post about a particular person (a friend, a streamer, a character) is not the
@@ -244,6 +246,26 @@ export function replySafe(p, lang) {
   if (/^\s*(?:@\w+\s+)*[>＞]/.test(p.raw)) return false;
   return safe(plain(p.raw), p);
 }
+/* ---------- matching: which side a post about love is on, and what it wishes ---------- */
+/* Matching News puts a post that speaks of a boyfriend beside one that speaks of a girlfriend, as a
+   matching app would put two people together. The side is read from the partner the post names, not
+   from who wrote it: nobody's gender is stated or shown.
+     'boyfriend'  the post speaks of a boyfriend (彼氏, 元カレ) and not of a girlfriend
+     'girlfriend' the post speaks of a girlfriend (彼女 where it reads so, 元カノ) and not of a boyfriend
+     ''           neither, or both: such a post is not matched */
+const HE = { ja: /彼氏|彼ピ|元カレ|元彼/, en: /\b(?:boyfriend|bf)\b/i };
+const SHE = { ja: new RegExp(GIRLFRIEND), en: /\b(?:girlfriend|gf)\b/i };
+export function sideOf(text, lang) {
+  const t = String(text || '');
+  const he = HE[lang].test(t), she = SHE[lang].test(t);
+  return he && !she ? 'boyfriend' : she && !he ? 'girlfriend' : '';
+}
+/* A post that wishes for a partner (ほしい, できない, いない, 作りたい), rather than telling of one. */
+const WISH = {
+  ja: /(?:彼氏|彼女|恋人|好きな人)(?:が|は|も|を|とか|って)?\s*(?:ほし|欲し|でき(?:な|ん|る気|たら|ます)|出来(?:な|ん)|いな|居な|おら|作り|つくり|作っ|つくっ)|恋(?:がしたい|したい|してみたい)|クリぼっち|ぼっち|独り身|ひとり身|出会いが(?:ない|無い|ほし|欲し)/,
+  en: /\b(?:want|need|wish i had|looking for|no|never had) an? (?:boyfriend|girlfriend)|\bsingle\b/i,
+};
+export const wishes = (text, lang) => WISH[lang].test(String(text || ''));
 /* A post that asks something. */
 export const asks = text => /[？?][\s\p{Extended_Pictographic}️]*$/u.test(String(text || '').trim());
 /* The same line, whatever its marks: one is enough. */
@@ -324,7 +346,7 @@ export async function writeIndex(outDir, source, outs, matches) {
     out.talks.forEach(t => { genres[t.genre] = (genres[t.genre] || 0) + 1; });
     langs[out.lang] = { ...(langs[out.lang] || {}), updated: out.updated, count: out.talks.length, genres };
   });
-  (matches || []).forEach(m => { langs[m.lang] = { ...(langs[m.lang] || {}), match: { posts: m.posts.length, lines: m.lines.length }, stages: m.stages || null }; });
+  (matches || []).forEach(m => { langs[m.lang] = { ...(langs[m.lang] || {}), match: { posts: m.posts.length, boyfriend: m.posts.filter(p => p.side === 'boyfriend').length, girlfriend: m.posts.filter(p => p.side === 'girlfriend').length, lines: m.lines.length }, stages: m.stages || null }; });
   await writeFile(path.join(outDir, 'v1', 'index.json'), JSON.stringify({ version: 1, updated: stamp(), source, langs }, null, 1) + '\n');
   await writeFile(path.join(outDir, '.changed'), stamp() + '\n');
 }

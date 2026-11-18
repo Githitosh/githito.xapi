@@ -38,7 +38,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost, loveSafe, loveFit, replySafe } from './rules.mjs';
+import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost, loveSafe, loveFit, replySafe, sideOf, wishes } from './rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -127,9 +127,13 @@ async function fromX(handle, id, replyTo) {
    program's rules choose (rules.mjs, lovePost: no partner-seeking, no selling, no fiction, no school
    age, an account that is old and ordinary); then the post is read from X itself and X's words are
    judged again and saved. */
-async function loveStage(lang, words) {
+async function loveStage(lang, words, wordsShe) {
   const posts = [];
-  const list = shuffle(words);
+  /* Posts that speak of a girlfriend are much rarer than posts that speak of a boyfriend, and a match
+     needs one of each: every other search is for the girlfriend side. */
+  const a = shuffle(words), b = shuffle(wordsShe || []);
+  const list = [];
+  for (let k = 0; k < Math.max(a.length, b.length) * 2; k++) { const from = k % 2 === 0 && b.length ? b : a; if (from.length) list.push(from[Math.floor(k / 2) % from.length]); }
   const count = { gathered: 0, filter1: 0, filter2: 0, filter3: 0 };
   let searches = 0;
   let refusals = 0;
@@ -281,7 +285,7 @@ async function matchOf(lang, genres, talks, source) {
   const political = text => { const t = String(text || '').toLowerCase(); return polWords.some(w => t.includes(w)); };
   const addPost = (p, found) => {
     if (!postOk(p, lang) || political(p.text) || posts.some(x => x.id === p.id || x.handle.toLowerCase() === p.handle.toLowerCase())) return;
-    posts.push({ id: p.id, handle: p.handle, text: p.text, url: p.url, at: p.at || '', genre: 'romance', word: p.word || '', asks: asks(p.text), via: 'love', found });
+    posts.push({ id: p.id, handle: p.handle, text: p.text, url: p.url, at: p.at || '', genre: 'romance', word: p.word || '', asks: asks(p.text), side: sideOf(p.text, lang), wish: wishes(p.text, lang), via: 'love', found });
   };
   const addLine = (l, found) => {
     if (!l || !l.id || !l.handle || !l.to || !cleanText(l.text)) return;
@@ -300,7 +304,8 @@ async function matchOf(lang, genres, talks, source) {
   /* A run that searched nothing keeps the counts of the last run that did. */
   const stages = CONF.noSearch || !STAGES[lang] ? (before.stages || null) : { at: stamp(), ...STAGES[lang] };
   const out = { version: 1, lang, updated: stamp(), source, stages, posts: posts.slice(0, CONF.posts), lines: lines.slice(0, CONF.lines).map(({ key, ...l }) => l) };
-  console.log(`  ${lang} matching: ${out.posts.length} posts and ${out.lines.length} lines (${out.lines.filter(l => !l.needs.length).length} of them can answer any post).`);
+  const sides = k => out.posts.filter(p => p.side === k).length;
+  console.log(`  ${lang} matching: ${out.posts.length} posts (${sides('boyfriend')} speak of a boyfriend, ${sides('girlfriend')} of a girlfriend, ${sides('')} of neither; ${out.posts.filter(p => p.wish).length} wish for one) and ${out.lines.length} lines.`);
   return out;
 }
 const official = {
@@ -407,12 +412,12 @@ async function main() {
   }
   const src = name === 'official' ? official : fx;
   if (src === official && !CONF.token) throw new Error('The source is official but X_BEARER_TOKEN is not set.');
-  const { genres, any, match: loveWords } = JSON.parse(await readFile(path.join(HERE, 'words.json'), 'utf8'));
+  const { genres, any, match: loveWords, matchShe: sheWords } = JSON.parse(await readFile(path.join(HERE, 'words.json'), 'utf8'));
   const outs = [];
   const matches = [];
   for (const lang of (CONF.langs.length ? CONF.langs : ['ja'])) {
     console.log(src === fx ? `Collecting ${lang}: searches, this program's filter, words read from X` : `Collecting ${lang} from X's API`);
-    if (src === fx) NEW[lang] = { posts: await loveStage(lang, (loveWords && loveWords[lang]) || []), lines: [] };
+    if (src === fx) NEW[lang] = { posts: await loveStage(lang, (loveWords && loveWords[lang]) || [], (sheWords && sheWords[lang]) || []), lines: [] };
     const out = src === fx ? await twoStages(lang, genres, (any && any[lang]) || []) : await collect(lang, genres, src);
     outs.push(out);
     const match = await matchOf(lang, genres, out.talks, src.name);

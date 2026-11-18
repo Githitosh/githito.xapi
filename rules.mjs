@@ -328,14 +328,20 @@ const saysWord = (t, w) => { const k = String(w).toLowerCase(); return /^[一-�
 const saysOne = (t, list) => (list || []).find(w => saysWord(t, w)) || '';
 /* A lexicon's every word, for the collector: sayings worth reading say one of them, ask, or agree. */
 export const lexiconWords = lex => [...new Set([].concat(...(lex.echo || []).map(e => e[0].concat(e[1])), ...(lex.kin || []), lex.agree || [], lex.seed || []))];
-/* Words that find a romantic exchange: a confession and its answer, or a hint and a reply that plays along. */
-const ROMANCE_ECHO = /好き|会い|付き合|デート|告白|寂|幸せ|ただいま|おかえり|おやす/;
+/* Words that find a romantic exchange: a confession and its answer, or a hint and a reply that plays along.
+   Goodnight and sleepy lines (おやすみ, ねむい) are not romance. */
+const ROMANCE_ECHO = /好き|会い|付き合|デート|告白|寂|幸せ|ただいま|おかえり/;
+const SLEEPY = /ねむい|ねむた|眠い|眠た|おやすみ|寝よ|寝な|寝て/;
 /* A saying that can open or answer a romantic pair. Used to keep those when the list is cut down. */
-export const romanceSay = text => /好き(?:だよ|です|かも|なの)|大好き|付き合|告白|デート|彼氏|彼女と|匂わせ|わたしも|俺も|僕も|いいよ|羨ま|確定|それもう/.test(String(text || ''));
+export const romanceSay = text => !SLEEPY.test(String(text || '')) && /好き(?:だよ|です|かも|なの)|大好き|付き合|告白|デート|彼氏|彼女と|匂わせ|わたしも|俺も|僕も|いいよ|羨ま|確定|それもう/.test(String(text || ''));
+/* Search words: the romantic ones only. Bare answers (うん, いいよ, 私も) and sleepy words are left out,
+   so the pool is not ordinary small talk. */
+const ROMANCE_WORD = /好き|付き合|デート|告白|彼氏|彼女|匂わせ|会い|おかえり|ただいま|幸せ|寂|わたしも|お揃い|手を繋|手つない|迎えに来|プレゼント|奢って|おごって/;
+const BROAD_WORD = new Set('うん いいよ いいね こちらこそ 待ってる おめでとう 詳しく ずるい いい夢 また明日 おやすみ 私も 俺も 僕も ぼくも'.split(' '));
 export const romanceWords = lex => {
   const flat = pairs => (pairs || []).flatMap(([a, b]) => (a || []).concat(b || []));
   const echo = (lex.echo || []).filter(([L]) => ROMANCE_ECHO.test((L && L[0]) || '')).flatMap(([a, b]) => a.concat(b));
-  return [...new Set(flat(lex.land).concat(flat(lex.hint), echo))];
+  return [...new Set(flat(lex.land).concat(flat(lex.hint), echo))].filter(w => ROMANCE_WORD.test(w) && !BROAD_WORD.has(w) && !SLEEPY.test(w));
 };
 export function pairable(text, lex) {
   const t = String(text || '').toLowerCase();
@@ -358,6 +364,8 @@ export function pairUp(items, lex, lang) {
     if (seen.has(k) || seen.has(b.x.id + '|' + a.x.id)) return false;
     /* One saying is not used in more than six pairs, so the videos do not turn on the same few. */
     if ((uses.get(a.x.id) || 0) >= 6 || (uses.get(b.x.id) || 0) >= 6) return false;
+    /* Sleepy lines (ねむい, おやすみ) are not a romantic exchange. */
+    if (lex.romance && SLEEPY.test(a.t + b.t)) return false;
     seen.add(k);
     uses.set(a.x.id, (uses.get(a.x.id) || 0) + 1);
     uses.set(b.x.id, (uses.get(b.x.id) || 0) + 1);
@@ -371,21 +379,22 @@ export function pairUp(items, lex, lang) {
   };
   const short = (i, max) => !i.q && i.n <= max;
   const cold = /無理|うざ|キモ|きも|やめろ|嫌|むり|しつこい|別れよ|うざい/;
-  const food = /ラーメン|寿司|焼肉|カレー|うどん|パスタ|美味|うまい|ご飯食べ/;
+  /* Liking a song, a meal, or sleep is not a confession. */
+  const notPerson = /ラーメン|寿司|焼肉|カレー|うどん|パスタ|美味|うまい|ご飯|食べ|飲み|歌|曲|ライブ|アニメ|ゲーム|サイゼ|映画|漫画|選手|試合|ねむ|眠い|おやす/;
   /* 恋愛成立: a short confession, and a short answer that accepts it. */
   const confess = i => {
-    if (i.n > 26 || i.n < 2 || cold.test(i.t)) return false;
+    if (i.n > 26 || i.n < 2 || cold.test(i.t) || notPerson.test(i.t) || SLEEPY.test(i.t)) return false;
     /* A line that teases a hint ("付き合ってるじゃん") is the reply, not the confession. */
     if (/じゃん|匂わせ|羨ま|うらや|確定|それもう|詳しく|誰と|誰から|見せて/.test(i.t)) return false;
     if (/付き合(?:って|お|おう|いたい)|告白|デート(?:しよ|行こ|いこ|しない)|恋人にな/.test(i.t)) return true;
-    return /好き(?:だよ|です|かも|なの|になった|すぎ)|大好き/.test(i.t) && !food.test(i.t);
+    return /好き(?:だよ|です|かも|なの|になった|すぎ)|大好き/.test(i.t);
   };
-  const accept = i => i.n <= 18 && i.n >= 1 && !cold.test(i.t) && !food.test(i.t)
-    && /(?:私も|わたしも|俺も|僕も|ぼくも|おれも|うちも|いいよ|いいね|うん|こちらこそ|待って(?:た|る)|付き合お|好きだよ|大好き|わかった|分かる|オッケー|おっけ)/.test(i.t);
+  const accept = i => i.n <= 18 && i.n >= 1 && !cold.test(i.t) && !notPerson.test(i.t) && !SLEEPY.test(i.t)
+    && /(?:私も|わたしも|俺も|僕も|ぼくも|おれも|うちも|いいよ|こちらこそ|待って(?:た|る)|付き合お|好きだよ|大好き)/.test(i.t);
   /* 匂わせに乗る: the post hints at a partner, and the reply plays along. */
-  const hintOpen = i => i.n <= 32 && i.n >= 4 && !cold.test(i.t)
+  const hintOpen = i => i.n <= 32 && i.n >= 4 && !cold.test(i.t) && !SLEEPY.test(i.t)
     && /彼氏|彼女と|彼女いる|彼女できた|彼女が好き|デート|プレゼント(?:もら|くれ|届)|奢ってく|おごってく|迎えに来て|匂わせ|お揃い|手を繋|手つない/.test(i.t);
-  const hintRide = i => i.n <= 24 && i.n >= 2 && !cold.test(i.t) && !food.test(i.t)
+  const hintRide = i => i.n <= 24 && i.n >= 2 && !cold.test(i.t) && !notPerson.test(i.t) && !SLEEPY.test(i.t)
     && /付き合|彼氏じゃん|彼女じゃん|匂わせ|羨ま|うらや|おめでとう|詳しく|ずる|ズル|確定|カップル|いいな|見せて|誰から|誰と|それもう|乗っか|脈あり|両思い/.test(i.t);
   cross(T.filter(confess), T.filter(accept), 'land', '好き', 80);
   cross(T.filter(hintOpen), T.filter(hintRide), 'hint', '匂わせ', 80);

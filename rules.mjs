@@ -343,6 +343,16 @@ export const romanceWords = lex => {
   const echo = (lex.echo || []).filter(([L]) => ROMANCE_ECHO.test((L && L[0]) || '')).flatMap(([a, b]) => a.concat(b));
   return [...new Set(flat(lex.land).concat(flat(lex.hint), echo))].filter(w => ROMANCE_WORD.test(w) && !BROAD_WORD.has(w) && !SLEEPY.test(w));
 };
+/* Words that find the swapped-word joke: a place or a thing, and the little situations the joke turns on
+   (迷子, 間違えた). Everyday words such as ねむい are not among them. */
+export const jokeWords = lex => [...new Set([].concat(...(lex.kin || []), '迷子', '間違えた', (lex.seed || []).filter(w => /迷子|間違|どこ/.test(w))))];
+/* A short saying that names one of a family, so it can be swapped with a rival (ディズニー / USJ). */
+export const kinSay = (text, lex) => {
+  const t = String(text || '');
+  if (SLEEPY.test(t) || charLen(t) > 18 || !lex) return false;
+  const low = t.toLowerCase();
+  return (lex.kin || []).some(group => group.some(w => low.includes(String(w).toLowerCase())));
+};
 export function pairable(text, lex) {
   const t = String(text || '').toLowerCase();
   return asks(text) || !!saysOne(t, lexiconWords(lex)) || /[なねわよ][ぁあー〜]*$/.test(coreOf(text));
@@ -398,6 +408,37 @@ export function pairUp(items, lex, lang) {
     && /付き合|彼氏じゃん|彼女じゃん|匂わせ|羨ま|うらや|おめでとう|詳しく|ずる|ズル|確定|カップル|いいな|見せて|誰から|誰と|それもう|乗っか|脈あり|両思い/.test(i.t);
   cross(T.filter(confess), T.filter(accept), 'land', '好き', 80);
   cross(T.filter(hintOpen), T.filter(hintRide), 'hint', '匂わせ', 80);
+  /* The joke: the same short shape, with one word swapped for another of its family.
+     ディズニーシーで迷子 ー 今USJ. A longer line that only mentions the word is not the joke. */
+  const punchy = i => i.n <= 16 && !SLEEPY.test(i.t);
+  /* What is left after the family word. The long vowel mark stays: coreOf would turn ディズニー into ディズニ. */
+  const restOf = (i, w) => {
+    let t = i.t.replace(/[\s　、。，．,.!?！？…・〜～\-⁉‼()（）「」]+/g, '');
+    const k = String(w).toLowerCase();
+    if (k && t.includes(k)) t = t.split(k).join('');
+    return t;
+  };
+  /* Particles and the little situation (で迷子, と間違えた, 今) are the frame. Anything else left over
+     means the line is about something besides the swap, so it is not the joke. */
+  const frameLeft = rest => charLen(rest.replace(/シー|ランド|パーク|で|と|に|へ|は|が|を|も|の|なう|いま|今|迷子|間違えた|間違|行きたい|いきたい|行き|いた|おる|いる|来た|行っ/g, ''));
+  (lex.kin || []).forEach(group => {
+    const by = group.map(w => [w, T.filter(i => punchy(i) && saysWord(i.t, w) && frameLeft(restOf(i, w)) === 0 && charLen(restOf(i, w)) <= 8)]).filter(x => x[1].length);
+    let n = 0;
+    mix(by).forEach(([w, A]) => mix(by).forEach(([v, B]) => {
+      if (w === v || n >= 8) return;
+      for (const a of mix(A)) {
+        let hit = false;
+        for (const b of mix(B)) {
+          if (saysWord(a.t, v) || saysWord(b.t, w)) continue;
+          if (frameLeft(restOf(a, w)) > 0 || frameLeft(restOf(b, v)) > 0) continue;
+          const open = a.n >= b.n ? a : b;
+          const shut = open === a ? b : a;
+          if (add(open, shut, 'kin', w)) { n++; hit = true; break; }
+        }
+        if (hit) break;
+      }
+    }));
+  });
   /* 1. A word and the word that answers it. The word is most of what each one says.
      Romance keeps only the couple exchanges (好き / 私も), not food or the weather. */
   const mostly = (i, list) => { const w = short(i, 16) ? saysOne(i.t, list) : ''; return !!w && i.core.length <= charLen(w) + 6; };

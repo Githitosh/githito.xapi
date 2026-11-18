@@ -38,7 +38,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost, loveSafe, loveFit, replySafe, sideOf, wishes, freeOf, sayOk, sayText, pairable, pairUp, lexiconWords, romanceWords, romanceSay } from './rules.mjs';
+import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost, loveSafe, loveFit, replySafe, sideOf, wishes, freeOf, sayOk, sayText, pairable, pairUp, lexiconWords, romanceWords, romanceSay, jokeWords, kinSay } from './rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -237,9 +237,9 @@ async function readSay(c, lang) {
 }
 async function sayStage(lang, lex, anyWords) {
   const says = [];
-  /* Find posts with FxTwitter (the only one of the three that searches). A romance lexicon is searched
-     with romance words only: everyday words such as ねむい were filling the pool. Odd searches are replies. */
-  const romance = lex && lex.romance ? romanceWords(lex) : lexiconWords(lex || {});
+  /* Find posts with FxTwitter (the only one of the three that searches). Romance searches romance words
+     and the families a joke can swap (ディズニー / USJ), not everyday words such as ねむい. Odd searches are replies. */
+  const romance = lex && lex.romance ? romanceWords(lex).concat(jokeWords(lex)) : lexiconWords(lex || {});
   const list = shuffle(lex && lex.romance ? romance : [].concat(romance, anyWords || []));
   const seen = new Set();
   const pool = [];
@@ -459,10 +459,13 @@ async function matchOf(lang, genres, talks, source) {
     t.replies.forEach(r => addSay({ ...r, reply: true, to: t.post.id, found: t.found }));
   });
   lines.forEach(l => addSay({ ...l, reply: true, found: l.found }));
+  const lex = LEX[lang];
   const love = shuffle(says.filter(s => romanceSay(s.text)));
-  const rest = shuffle(says.filter(s => !romanceSay(s.text)));
-  /* Romance keeps sayings about love. Sleepy and everyday lines from the previous file are not carried over. */
-  const kept = (LEX[lang] && LEX[lang].romance ? love : love.concat(rest)).slice(0, CONF.says);
+  const jokes = shuffle(says.filter(s => lex && kinSay(s.text, lex) && !romanceSay(s.text)));
+  const rest = shuffle(says.filter(s => !romanceSay(s.text) && !(lex && kinSay(s.text, lex))));
+  /* Romance keeps sayings about love, and the short lines a word can be swapped in (ディズニー / USJ).
+     Sleepy and everyday lines from the previous file are not carried over. */
+  const kept = (lex && lex.romance ? jokes.concat(love) : jokes.concat(love, rest)).slice(0, CONF.says);
   const pairs = LEX[lang] ? pairUp(kept, LEX[lang], lang) : [];
   const kinds = {};
   pairs.forEach(p => { kinds[p.kind] = (kinds[p.kind] || 0) + 1; });

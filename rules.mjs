@@ -266,6 +266,13 @@ const WISH = {
   en: /\b(?:want|need|wish i had|looking for|no|never had) an? (?:boyfriend|girlfriend)|\bsingle\b/i,
 };
 export const wishes = (text, lang) => WISH[lang].test(String(text || ''));
+/* A post that tells of a partner the writer has is not matched with anybody: a match is for people
+   who are free. Free: the post wishes for a partner, or speaks of one who is gone (an ex, a parting,
+   a love that was not returned), or names no partner at all. */
+const GONE = { ja: /元カレ|元カノ|元彼|別れ(?:た(?!く)|て(?!ほし|欲し)|まし)|失恋|振られ|フラれ|ふられ|片思い|片想い|クリぼっち|独り身|フリー/, en: /\b(?:my ex|broke up|dumped|single|heartbroken|unrequited)\b/i };
+/* "My boyfriend now", beside talk of an ex: the writer is not free. */
+const NOW = { ja: /今の(?:彼氏|彼女|恋人)|今彼|今カレ|今カノ|初彼女|初彼氏/, en: /\bmy (?:new|current) (?:boyfriend|girlfriend)\b/i };
+export const freeOf = (text, lang) => { const t = String(text || ''); return !sideOf(t, lang) || wishes(t, lang) || (GONE[lang].test(t) && !NOW[lang].test(t)); };
 /* A post that asks something. */
 export const asks = text => /[？?][\s\p{Extended_Pictographic}️]*$/u.test(String(text || '').trim());
 /* The same line, whatever its marks: one is enough. */
@@ -346,7 +353,7 @@ export async function writeIndex(outDir, source, outs, matches) {
     out.talks.forEach(t => { genres[t.genre] = (genres[t.genre] || 0) + 1; });
     langs[out.lang] = { ...(langs[out.lang] || {}), updated: out.updated, count: out.talks.length, genres };
   });
-  (matches || []).forEach(m => { langs[m.lang] = { ...(langs[m.lang] || {}), match: { posts: m.posts.length, boyfriend: m.posts.filter(p => p.side === 'boyfriend').length, girlfriend: m.posts.filter(p => p.side === 'girlfriend').length, lines: m.lines.length }, stages: m.stages || null }; });
+  (matches || []).forEach(m => { langs[m.lang] = { ...(langs[m.lang] || {}), match: { posts: m.posts.length, boyfriend: m.posts.filter(p => p.side === 'boyfriend').length, girlfriend: m.posts.filter(p => p.side === 'girlfriend').length, free: m.posts.filter(p => p.free).length, lines: m.lines.length }, stages: m.stages || null }; });
   await writeFile(path.join(outDir, 'v1', 'index.json'), JSON.stringify({ version: 1, updated: stamp(), source, langs }, null, 1) + '\n');
   await writeFile(path.join(outDir, '.changed'), stamp() + '\n');
 }

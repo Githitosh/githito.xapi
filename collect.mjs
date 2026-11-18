@@ -38,7 +38,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost, loveSafe, loveFit, replySafe, sideOf, wishes } from './rules.mjs';
+import { talkPost, pickReplies, zest, stamp, readJson, writeApi, writeIndex, young, stillOk, readEmbed, genreOf, plain, pickLine, lineOf, lineKey, asks, cleanText, postOk, writeMatch, lovePost, loveSafe, loveFit, replySafe, sideOf, wishes, freeOf } from './rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -285,7 +285,7 @@ async function matchOf(lang, genres, talks, source) {
   const political = text => { const t = String(text || '').toLowerCase(); return polWords.some(w => t.includes(w)); };
   const addPost = (p, found) => {
     if (!postOk(p, lang) || political(p.text) || posts.some(x => x.id === p.id || x.handle.toLowerCase() === p.handle.toLowerCase())) return;
-    posts.push({ id: p.id, handle: p.handle, text: p.text, url: p.url, at: p.at || '', genre: 'romance', word: p.word || '', asks: asks(p.text), side: sideOf(p.text, lang), wish: wishes(p.text, lang), via: 'love', found });
+    posts.push({ id: p.id, handle: p.handle, text: p.text, url: p.url, at: p.at || '', genre: 'romance', word: p.word || '', asks: asks(p.text), side: sideOf(p.text, lang), wish: wishes(p.text, lang), free: freeOf(p.text, lang), via: 'love', found });
   };
   const addLine = (l, found) => {
     if (!l || !l.id || !l.handle || !l.to || !cleanText(l.text)) return;
@@ -305,7 +305,7 @@ async function matchOf(lang, genres, talks, source) {
   const stages = CONF.noSearch || !STAGES[lang] ? (before.stages || null) : { at: stamp(), ...STAGES[lang] };
   const out = { version: 1, lang, updated: stamp(), source, stages, posts: posts.slice(0, CONF.posts), lines: lines.slice(0, CONF.lines).map(({ key, ...l }) => l) };
   const sides = k => out.posts.filter(p => p.side === k).length;
-  console.log(`  ${lang} matching: ${out.posts.length} posts (${sides('boyfriend')} speak of a boyfriend, ${sides('girlfriend')} of a girlfriend, ${sides('')} of neither; ${out.posts.filter(p => p.wish).length} wish for one) and ${out.lines.length} lines.`);
+  console.log(`  ${lang} matching: ${out.posts.length} posts (${sides('boyfriend')} speak of a boyfriend, ${sides('girlfriend')} of a girlfriend, ${sides('')} of neither; ${out.posts.filter(p => p.wish).length} wish for one; ${out.posts.filter(p => p.free).length} are free to be matched) and ${out.lines.length} lines.`);
   return out;
 }
 const official = {

@@ -58,21 +58,21 @@ const shuffle = list => list.map(x => [Math.random(), x]).sort((a, b) => a[0] - 
 /* Each kind has its searches and the hours of the day (Japan) in which it is said. */
 const SEARCHES = {
   ja: [
-    { kind: 'morning', share: 0.34, hours: [5, 6, 7, 8, 9], q: [
+    { kind: 'morning', share: 0.28, hours: [5, 6, 7, 8, 9], q: [
       '(おはおは OR おはよーだよ OR おっはー OR おはよん OR おはよぉ OR おはよーん)',
       '(おはよう OR おはよ OR おはよー) (♡ OR 💕 OR 🥰 OR 😘 OR 好き OR 大好き OR ぎゅ)',
       '(おはよう OR おはよ) (今日も頑張 OR いってらっしゃい OR 気をつけてね OR 起きれた OR 起きた？ OR 寒いね)',
       '(おはよ♡ OR おはよう♡ OR おはよ〜 OR おはよっ OR おはよー！)',
     ] },
-    { kind: 'night', share: 0.12, hours: [21, 22, 23, 0, 1], q: [
+    { kind: 'night', share: 0.1, hours: [21, 22, 23, 0, 1], q: [
       '(おやすみん OR おやすー OR ねんね OR すやぁ OR おやぴ OR おやすみなさいませ)',
       '(おやすみ OR おやすみなさい) (♡ OR 💕 OR 🥰 OR 😘 OR 好き OR 大好き OR また明日)',
     ] },
-    { kind: 'home', share: 0.12, hours: [17, 18, 19, 20, 21, 22], q: [
+    { kind: 'home', share: 0.1, hours: [17, 18, 19, 20, 21, 22], q: [
       '(ただいまー OR おかえりー OR おつかれさま♡ OR おかえりなさい♡ OR がんばったね)',
       '(おかえり OR お疲れさま OR おつかれさま) (♡ OR 💕 OR 🥰 OR えらい OR 頑張ったね OR ゆっくりしてね)',
     ] },
-    { kind: 'love', share: 0.42, hours: null, q: [
+    { kind: 'love', share: 0.52, hours: null, q: [
       '(だいしゅき OR すきすき OR ぎゅーして OR ちゅー OR 会いたいよ OR なでなで OR ♡)',
       '(彼氏 OR 彼女 OR 旦那 OR 嫁) (すき OR ぎゅー OR だいすき OR ありがと)',
       '(愛してる OR あいしてる OR 愛してるよ OR 大好きすぎ OR ずっと一緒にいようね OR 一生離さない)',
@@ -89,7 +89,7 @@ const SEARCHES = {
 };
 /* The loving, lovey-dovey kind of talk comes first. */
 const ICHA = {
-  ja: /愛してる|あいしてる|いちゃ|イチャ|くっつ|甘え|ぎゅーって|ちゅーして|ちゅっ|一生離さない|ずっと一緒|大好きすぎ/,
+  ja: /愛してる|あいしてる|いちゃ|イチャ|くっつ[きいこ]|甘え|ぎゅーって|ちゅーして|ちゅっ|一生離さない|ずっと一緒|大好きすぎ/,
   en: /i love you|love you so much|love you forever|cuddle|snuggle|can'?t wait to (?:see|hold) you/i,
 };
 /* Cute, loving ways of saying things are preferred to plain greetings. */
@@ -103,7 +103,7 @@ const PLAIN = {
 };
 /* Everyday couple talk: greetings, thanks, missing each other, and love. */
 const LOVE = {
-  ja: /大好き|だいすき|だいしゅき|しゅき|好き|すき|愛して|あいして|いちゃ|イチャ|くっつ|甘え|会いたい|あいたい|ぎゅ|ちゅ|なでなで|よしよし|かわいい|可愛い|かっこいい|おやす|ねんね|すや|おはよ|おはおは|おっはー|おつかれ|お疲れ|ただいま|おかえり|いってらっしゃ|いってきます|気をつけて|がんばったね|ありがと|ずっと一緒|一緒に|ハグ|彼氏|彼女|旦那|嫁|♡|❤|♥|💕|💗|💓|💖|💘|💞|🥰|😘|😚|😍|🤗|💤|😴|☺/,
+  ja: /大好き|だいすき|だいしゅき|しゅき|好き|すき|愛して|あいして|いちゃ|イチャ|くっつ[きいこ]|甘え|会いたい|あいたい|ぎゅ|ちゅ|なでなで|よしよし|かわいい|可愛い|かっこいい|おやす|ねんね|すや|おはよ|おはおは|おっはー|おつかれ|お疲れ|ただいま|おかえり|いってらっしゃ|いってきます|気をつけて|がんばったね|ありがと|ずっと一緒|一緒に|ハグ|彼氏|彼女|旦那|嫁|♡|❤|♥|💕|💗|💓|💖|💘|💞|🥰|😘|😚|😍|🤗|💤|😴|☺/,
   en: /love you|love ya|luv u|\bily\b|cuddle|snuggle|miss you|my love|\bbabe\b|\bbaby\b|honey|sweetheart|cutie|handsome|beautiful|xoxo|xxx|forever|good ?night|night night|nighty|good ?morning|sunshine|rise and shine|sleep well|sleep tight|sweet dreams|home safe|take care|thank you|boyfriend|girlfriend|husband|wife|❤|♥|💕|💗|🥰|😘|😚|😍|🤗|💤|😴/i,
 };
 const SHORT = { ja: 30, en: 90 };
@@ -112,6 +112,8 @@ const LONG = { ja: 60, en: 180 };
 const UNSAFE_ROMANCE = /浮気|不倫|別れ|離婚|ブロック|死ね|殺|嫌い|最低|ストーカー|cheat|divorce|break ?up|hate you/i;
 const YOUTH = /学校|放課後|部活|修学旅行|制服|受験|担任|学年|文化祭|体育祭|授業|テスト|先生|クラス|\bschool\b|\bprom\b|\bhomework\b|\bgrade\b|\bclass\b|\bteacher\b/i;
 const MINOR_BIO = /(?:^|[^0-9])1[0-7]\s*(?:歳|才|y\/?o\b|years? old)|高[1-3１-３一二三](?:$|[^0-9０-９])|中[1-3１-３一二三](?:$|[^0-9０-９])|高校|中学|小学|学生|ＪＫ|ＪＣ|[LSF]?JK|\bJC\b|\bDK\b|\bminor\b|\bunder ?18\b|\bteen\b/i;
+/* An age in the words: nothing that may be about somebody under age plays here. */
+const AGE = /(?:^|[^0-9０-９\/:.月])(?:1[0-9]|[1-9])\s*(?:歳|才|さい)|(?:^|[^0-9０-９\/:.月])1[0-9](?:だね|になっ|にな[るり]|[?？])|未成年|十代|10代/;
 const EMOJI_HINT = /🍑|🍆|😏|🔞|💦|👅/u;
 const MOURN = /ご冥福|追悼|亡くな|お悔やみ|死去|\brip\b|passed away/i;
 /* Shops, media and bots greet everybody; a couple is two people. */
@@ -122,9 +124,9 @@ const POLITE = /さん|様|氏|先生|先輩|ございます|でした[。！!�
 /* Births and children are family news, not couple talk. */
 const FAMILY = /出産|妊娠|赤ちゃん|男の子|女の子|息子|娘|子供|子ども|こども|孫|ママ友|パパ友/;
 /* Talk about works, streams and campaigns is not talk between a couple; "ALT" is a picture's caption. */
-const FAN = /拡散|リポスト|\bRT\b|フォロー|イラスト|作品|配信|推し|\bALT\b|当選|企画|プレゼント|お迎え|納品|ご依頼|スペース|リスナー|ライブ|チケット|グッズ|新曲|アルバム|\bMV\b|動画|投稿|写真集/;
+const FAN = /拡散|リポスト|\bRT\b|フォロー|イラスト|作品|配信|推し|\bALT\b|当選|企画|プレゼント|お迎え|納品|ご依頼|スペース|リスナー|ライブ|チケット|グッズ|新曲|アルバム|\bMV\b|動画|投稿|写真集|選びました|シーン|リスペクト|曲|歌っ|歌う|ゲーム|ガチャ|イベント|タグ|呼びタメ|タメ口|タメで|お言葉に甘え|尊い|\bFGO\b|とうらぶ|くっつ[くけ]/;
 /* Nothing of the body on this page. */
-const BODY = /ベッ[ドト]|添い寝|お風呂|風呂|脱[がぎぐい]|裸|舐|胸|尻|下着|えっち|エッチ|エロ|ホテル|お泊|泊ま|🍌|🍒|💦|🍑|🍆/;
+const BODY = /ベッ[ドト]|添い寝|お風呂|風呂|脱[がぎぐい]|裸|舐|胸|尻|下着|えっち|エッチ|エロ|ホテル|お泊|泊ま|濡れ|お口|唇|くちびる|ばぶ|おっぱ|🍌|🍒|💦|🍑|🍆|🤱|👄|😛|🤤/u;
 const squash = text => String(text || '').toLowerCase().replace(/[\s　"'“”‘’「」『』（）()\[\]【】、。，．,.!?！？…・:：;；\-–—~〜ｗw]+/g, '');
 const postText = st => String((st && st.text) || '').replace(/https?:\/\/\S+/g, ' ').replace(/@\w+/g, ' ').replace(/[#＃]\S+/g, ' ').replace(/\s+/g, ' ').trim();
 const handleOf = st => String((st && st.author && st.author.screen_name) || '').replace(/^@+/, '');
@@ -141,7 +143,7 @@ function romanceText(st, lang) {
   const text = postText(st);
   const a = (st && st.author) || {};
   const bio = String(a.description || a.bio || '') + ' ' + String(a.name || '');
-  if (!text || !cleanText(text) || UNSAFE_ROMANCE.test(text) || YOUTH.test(text) || EMOJI_HINT.test(text) || MOURN.test(text)) return '';
+  if (!text || !cleanText(text) || UNSAFE_ROMANCE.test(text) || YOUTH.test(text) || AGE.test(text) || EMOJI_HINT.test(text) || MOURN.test(text)) return '';
   if (lang !== 'en' && (POLITE.test(text) || /[ｦ-ﾟ]{2,}/.test(text))) return '';
   if (FAN.test(text) || BODY.test(text) || FAMILY.test(text)) return '';
   if (MINOR_BIO.test(bio) || YOUTH.test(String(a.description || '')) || NOT_A_PERSON.test(bio) || a.protected || st.possibly_sensitive) return '';
@@ -156,7 +158,7 @@ export function talkKind(text) {
   if (/おは|朝だ|morning|rise and shine|sunshine|☀/i.test(t)) return 'morning';
   if (/おやす|ねんね|すや|寝る|寝よ|眠|night|sleep|dream|💤|😴/i.test(t)) return 'night';
   if (/ただいま|おかえり|おつかれ|お疲れ|がんばった|頑張った|home|welcome back/i.test(t)) return 'home';
-  if (/愛してる|あいしてる|いちゃ|イチャ|くっつ|甘え|一生離さない|ずっと一緒|i love you|cuddle|snuggle/i.test(t)) return 'icha';
+  if (/愛してる|あいしてる|いちゃ|イチャ|くっつ[きいこ]|甘え|一生離さない|ずっと一緒|i love you|cuddle|snuggle/i.test(t)) return 'icha';
   if (/会いたい|あいたい|寂し|さみし|miss/i.test(t)) return 'miss';
   if (/好き|すき|しゅき|愛|ぎゅ|ちゅ|なでなで|love|kiss|hug|♡|❤|💕/i.test(t)) return 'love';
   return 'other';
@@ -285,9 +287,9 @@ async function build(lang) {
   /* The file: this run's stories and the earlier ones that are still young and still may play. */
   const fresh = s => Date.now() - Date.parse(s.found || 0) < CONF.hours * 3600e3;
   const pairText = s => s.a.text + ' ' + s.b.text;
-  const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !EMOJI_HINT.test(pairText(s))
+  const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !AGE.test(s.a.text) && !AGE.test(s.b.text) && !EMOJI_HINT.test(pairText(s))
     && !FAN.test(pairText(s)) && !BODY.test(pairText(s)) && !FAMILY.test(pairText(s)) && (lang === 'en' || (!POLITE.test(s.a.text) && !POLITE.test(s.b.text)));
-  const stories = found.concat(old.filter(s => fresh(s) && ok(s))).slice(0, CONF.keep);
+  const stories = found.concat(old.filter(s => fresh(s) && ok(s)).map(s => ({ ...s, kind: talkKind(pairText(s)) }))).slice(0, CONF.keep);
   const kinds = {};
   stories.forEach(s => { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
   console.log(`  ${lang}: ${count.searches} searches gave ${count.replies} replies; ${count.candidates} may play; ${count.read} posts read; ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)}.`);

@@ -1,5 +1,6 @@
 # githito.xapi: builds the day's API at 6:00, 12:00 and 18:00 (Japan) and publishes it on the branch "api".
-# What it collects from is set in config.json ("source"). While that is "off", a run changes nothing.
+# What it collects from is set in config.json ("source"). While that is "off", only the Humor page's stories are made
+# (humor.mjs, config.json "humor").
 name: Collect
 on:
   schedule:
@@ -35,6 +36,11 @@ jobs:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node collect.mjs --out public
+      # The Humor page's stories (loving exchanges; greetings in their hours), made ahead so the page only reads them.
+      - name: Humor stories
+        env:
+          XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
+        run: node humor.mjs --out public
       - name: Publish (branch api, one commit, no history kept)
         run: |
           cd public

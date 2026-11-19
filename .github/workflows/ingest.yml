@@ -1,6 +1,7 @@
-# githito.xapi: adds a talk that the owner sent by hand.
+# githito.xapi: adds a talk that the owner sent by hand, or sets the accounts whose replies the News page may play.
 # An issue titled "talk" holds the links: the first is the post, the ones after it are replies.
 # Each link is read through X's official embed API (no key, no charge). Only the owner's issues are read.
+# An issue titled "account" lists X accounts, one on each line; it replaces the list in v1/accounts.json.
 name: Ingest
 on:
   issues:

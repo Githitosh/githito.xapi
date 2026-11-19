@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-/* githito.xapi: what people reply to the news on X, collected ahead of time.
+/* githito.xapi: the news on X, and the replies to the accounts the owner asked for, collected ahead of time.
 
-   The News page (githitosh.github.io/news-shorts/) plays replies: each card is one reply, and under it
-   the card says which news the reply is about. Searching X for that when Update is pressed takes too
-   long, so this program does it three times a day and writes one file, v1/news-<lang>.json, that the
-   page only reads.
+   The News page (githitosh.github.io/news-shorts/) plays the news accounts' own posts as headlines. It
+   plays replies only for an account its reader added in Settings: the page sends that list here as an
+   issue titled "account" (ingest.mjs), which writes v1/accounts.json. Replies are read only for those
+   accounts' posts; with no account asked for, no reply is searched or read at all. Searching X when
+   Update is pressed takes too long, so this program does it every half hour and writes one file,
+   v1/news-<lang>.json, that the page only reads.
 
      node news.mjs                   build once into ./public (Japanese)
      node news.mjs --searches 40     fewer reply searches (80 unless told); --conversations and --headSearches likewise
@@ -14,8 +16,10 @@
    How: X is read through more than one service and more than one way in, so that one of them refusing
    does not stop a run.
      0. The news accounts' own latest posts: each account's timeline (FxTwitter), or a search when the
-        timeline gives nothing. These are the headlines, and they say how many have replied.
-     1. Replies, two ways:
+        timeline gives nothing. These are the headlines, and they say how many have replied. The
+        accounts asked for are read first, every run; one that is not a news account gets "q": 1 on its
+        posts, so that the page plays them only for a reader who asked for it.
+     1. Replies to the accounts asked for, two ways:
         a. the replies under each news post, read directly (FxTwitter's conversation: one request gives
            a post and about twenty of its replies), the posts with the most replies first;
         b. searches of replies written to news accounts ("to:nhk_news"), each over a few hours of the
@@ -27,7 +31,8 @@
      3. The post each reply answers is read once (many replies answer the same post). It must be the
         news account's own post, and the news must not be about a death, a crime, an accident, a
         disaster or a war: jokes under such news are not for a video.
-     4. The file keeps up to 2000 replies for 72 hours, at most a few for one piece of news.
+     4. The file keeps up to 2000 replies for 72 hours, at most a few for one piece of news, and only
+        replies to the accounts asked for (an account taken off the list takes its replies with it).
      5. The news accounts' own latest posts are kept too, as headlines (up to 900 for 36 hours). The
         page plays them when replies are switched off, and for news that gets no replies.
    Settings are in config.json under "news"; "on": false turns it off. Node 20 or newer; no packages. */
@@ -389,14 +394,30 @@ async function build(lang) {
   const oldNews = (before.news && typeof before.news === 'object') ? before.news : {};
   const oldItems = (Array.isArray(before.items) ? before.items : []).filter(x => x && x.id && x.h && x.t && x.n && oldNews[x.n]);
   const tally = (before.accounts && typeof before.accounts === 'object') ? before.accounts : {};
-  const accounts = ACCOUNTS[lang] || [];
+  /* The accounts asked for (v1/accounts.json, written by ingest.mjs from the owner's "account" issue). */
+  const askedFile = await readJson(path.join(CONF.out, 'v1', 'accounts.json'), {});
+  const askedList = [...new Set((Array.isArray(askedFile.accounts) ? askedFile.accounts : []).map(a => String((a && a.h) || '')).filter(h => /^[A-Za-z0-9_]{1,15}$/.test(h)))].slice(0, 8);
+  const asked = new Set(askedList.map(h => h.toLowerCase()));
+  const isAsked = a => !!a && asked.has(String(a[0]).toLowerCase());
+  const base = (ACCOUNTS[lang] || []).concat(HEAD_ONLY[lang] || []);
+  const newsAccount = new Set(base.map(a => a[0].toLowerCase()));
+  const oldNames = new Map((Array.isArray(before.asked) ? before.asked : []).filter(a => a && a.h).map(a => [String(a.h).toLowerCase(), String(a.n || '')]));
+  /* An account asked for that is not in the table joins it for this run; a headline-only account asked for gets replies too. */
+  const accounts = (ACCOUNTS[lang] || []).slice();
+  askedList.forEach(h => {
+    if (accounts.some(a => a[0].toLowerCase() === h.toLowerCase())) return;
+    const known = base.find(a => a[0].toLowerCase() === h.toLowerCase());
+    accounts.push(known ? [known[0], known[1], known[2], 3] : [h, oldNames.get(h.toLowerCase()) || '@' + h, '', 3]);
+  });
+  if (askedList.length) console.log(`  ${lang}: replies are read for @${askedList.join(', @')}`);
+  else console.log(`  ${lang}: no account is asked for, so no reply is read (headlines only)`);
   const byHandle = new Map(accounts.map(a => [a[0].toLowerCase(), a]));
   const have = new Set(oldItems.map(x => x.id));
   const texts = new Set(oldItems.map(x => squash(x.t).slice(0, 40)));
   const count = { searches: 0, replies: 0, candidates: 0, read: 0, news: 0, items: 0, headSearches: 0, heads: 0, conversations: 0, convReplies: 0 };
   const deadline = Date.now() + CONF.minutes * 60e3;
   const late = () => Date.now() > deadline;
-  const everyAccount = accounts.concat(HEAD_ONLY[lang] || []);
+  const everyAccount = (HEAD_ONLY[lang] || []).filter(a => !byHandle.has(a[0].toLowerCase())).concat(accounts);
   const anyHandle = new Map(everyAccount.map(a => [a[0].toLowerCase(), a]));
 
   /* 0. The headlines: the news accounts' own latest posts. They are few searches, so they go first. */
@@ -406,10 +427,10 @@ async function build(lang) {
   const posts = [];   // the news posts seen in this run: where replies are read from
   let headRefusals = 0;
   let headRests = 0;
-  /* The main papers every run, then the other accounts by turns. */
-  const mainHeads = HEADS[lang] || [];
-  const otherHeads = shuffle(accounts.map(a => a[0]).filter(h => !mainHeads.includes(h) && !(tally[h] && tally[h].tries >= 3 && !tally[h].replies)));
-  for (const handle of CONF.noSearch ? [] : shuffle(mainHeads).concat(otherHeads).slice(0, CONF.headSearches)) {
+  /* The accounts asked for first, then the main papers every run, then the other accounts by turns. */
+  const mainHeads = (HEADS[lang] || []).filter(h => !asked.has(h.toLowerCase()));
+  const otherHeads = shuffle(accounts.map(a => a[0]).filter(h => !asked.has(h.toLowerCase()) && !mainHeads.includes(h)));
+  for (const handle of CONF.noSearch ? [] : askedList.concat(shuffle(mainHeads).concat(otherHeads).slice(0, CONF.headSearches))) {
     /* The accounts take a third of the run's time at most. */
     if (Date.now() > deadline - CONF.minutes * 40e3) { console.log('  headlines: time is up for this part'); break; }
     const a = anyHandle.get(handle.toLowerCase());
@@ -424,6 +445,10 @@ async function build(lang) {
       continue;
     }
     let got = 0;
+    /* An account asked for that is not a news account: its name as X shows it. */
+    const own = !newsAccount.has(handle.toLowerCase());
+    const shown = list.find(st => handleOf(st).toLowerCase() === handle.toLowerCase() && st.author && st.author.name);
+    if (own && shown) a[1] = String(shown.author.name).slice(0, 30);
     list.forEach(st => {
       const id = statusId(st);
       if (!id || handleOf(st).toLowerCase() !== handle.toLowerCase() || parentOf(st).id) return;
@@ -432,7 +457,7 @@ async function build(lang) {
       posts.push({ id, a, text, headline, replies: Number(st.replies) || 0, at: whenOf(st) });
       if (haveHead.has(id) || !headOk(text, headline)) return;
       haveHead.add(id);
-      newHeads.push({ id, h: a[0], n: a[1], t: headline, g: headGenre(a, text, lang), at: whenOf(st), rc: Number(st.replies) || 0, found: stamp() });
+      newHeads.push({ id, h: a[0], n: a[1], t: headline, g: headGenre(a, text, lang), at: whenOf(st), rc: Number(st.replies) || 0, found: stamp(), ...(own ? { q: 1 } : {}) });
       got++;
     });
     console.log(`  ${lang} headlines @${handle}: ${list.length} posts, ${got} new`);
@@ -460,7 +485,8 @@ async function build(lang) {
   const kept = oldHeads.filter(x => !seenPost.has(x.id) && !conv[x.id] && (Number(x.rc) || 0) >= 2 && newsOk(x.t, x.t))
     .map(x => ({ id: x.id, a: anyHandle.get(String(x.h).toLowerCase()), text: x.t, headline: x.t, replies: Number(x.rc) || 0, at: x.at || '' }))
     .filter(p => p.a).sort((x, y) => y.replies - x.replies);
-  const targets = freshPosts.concat(kept).slice(0, CONF.conversations);
+  /* Replies are read only under the posts of the accounts asked for. */
+  const targets = freshPosts.concat(kept).filter(p => isAsked(p.a)).slice(0, CONF.conversations);
   let convRefusals = 0;
   let convRests = 0;
   for (let i = 0; i < targets.length && !CONF.noSearch && !late(); i += 3) {
@@ -506,8 +532,8 @@ async function build(lang) {
   }
   console.log(`  ${lang} conversations: ${targets.length} news posts chosen, ${count.conversations} read, ${count.convReplies} replies, ${cands.length} may play`);
 
-  /* 1. The searches: each account by its share, an account that never answered left out. */
-  const alive = accounts.filter(a => { const t = tally[a[0]]; return !(t && t.tries >= 3 && !t.replies); });
+  /* 1. The searches: the accounts asked for, each by its share. */
+  const alive = accounts.filter(isAsked);
   const weight = alive.reduce((s, a) => s + a[3], 0) || 1;
   const now = Math.floor(Date.now() / 1000);
   const plan = [];
@@ -596,7 +622,9 @@ async function build(lang) {
   const allNews = { ...oldNews, ...news };
   const fresh = x => Date.now() - Date.parse(x.found || 0) < CONF.hours * 3600e3;
   const stillOk = x => replyOk(x.t) && allNews[x.n] && newsOk(allNews[x.n].t, allNews[x.n].t) && !echoes(x.t, allNews[x.n].t);
-  const items = found.concat(oldItems.filter(x => fresh(x) && stillOk(x))).slice(0, CONF.keep);
+  /* Only replies to the accounts asked for stay: an account taken off the list takes its replies with it. */
+  const askedNews = x => asked.has(String(allNews[x.n].h).toLowerCase());
+  const items = found.concat(oldItems.filter(x => fresh(x) && stillOk(x) && askedNews(x))).slice(0, CONF.keep);
   const usedNews = {};
   items.forEach(x => { usedNews[x.n] = allNews[x.n]; });
   const genres = {};
@@ -605,8 +633,6 @@ async function build(lang) {
   console.log(`  ${lang}: ${count.searches} searches gave ${count.replies} replies and ${count.conversations} conversations gave ${count.convReplies}; ${count.candidates} may play; ${count.read} news posts read (${failed.size} could not be read), ${count.news} may play; ${count.items} new replies. The file holds ${items.length} replies to ${Object.keys(usedNews).length} pieces of news.`);
   console.log('  by genre: ' + JSON.stringify(genres));
   console.log('  by source: ' + JSON.stringify(sources));
-  const quiet = accounts.filter(a => { const t = tally[a[0]]; return t && t.tries >= 3 && !t.replies; }).map(a => a[0]);
-  if (quiet.length) console.log('  accounts that gave nothing (left out): ' + quiet.join(', '));
   /* The headlines: this run's and the earlier ones that are still young, newest first, no line twice. */
   const headFresh = x => Date.now() - Date.parse(x.found || 0) < CONF.headHours * 3600e3;
   const headSeen = new Set();
@@ -618,7 +644,8 @@ async function build(lang) {
   const headGenres = {};
   heads.forEach(x => { headGenres[x.g || 'other'] = (headGenres[x.g || 'other'] || 0) + 1; });
   console.log(`  headlines: ${count.headSearches} searches gave ${count.heads} new; the file holds ${heads.length} ${JSON.stringify(headGenres)}`);
-  return { version: 3, lang, updated: stamp(), run: CONF.noSearch ? (before.run || null) : { at: stamp(), ...count }, genres, headGenres, accounts: tally, conv, play: newsPlay(items, usedNews, heads), news: usedNews, items, heads };
+  const askedOut = askedList.map(h => { const a = byHandle.get(h.toLowerCase()); return { h: a ? a[0] : h, n: a ? a[1] : '@' + h, news: newsAccount.has(h.toLowerCase()) }; });
+  return { version: 3, lang, updated: stamp(), run: CONF.noSearch ? (before.run || null) : { at: stamp(), ...count }, genres, headGenres, accounts: tally, asked: askedOut, conv, play: newsPlay(items, usedNews, heads), news: usedNews, items, heads };
 }
 
 async function main() {

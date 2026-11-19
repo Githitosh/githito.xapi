@@ -120,13 +120,13 @@ const MOURN = /ご冥福|追悼|亡くな|お悔やみ|死去|\brip\b|passed awa
 const NOT_A_PERSON = /公式|official|ニュース|新聞|news|放送|テレビ|編集部|広報|株式会社|\bbot\b|情報局|まとめ|運営|事務局|shop|store|店|サロン|クリニック|占い|鑑定|配信|ライバー|VTuber|Vtuber|アイドル|声優|モデル|コンカフェ|キャスト|メンエス|セラピスト/i;
 /* Two people who are close talk plainly. Polite forms and names with さん or 様 are a follower greeting
    a stranger, a fan writing to a star, a shop thanking a customer. */
-const POLITE = /さん|様|氏|先生|先輩|ございます|でした[。！!✨\s]|でしたね|いたします|致します|ください|下さい|ですね|ますね|ですよ|ましょう|です[！!。✨♡\s]|です$|ます[！!。✨\s]|ます$|しました|ありがとうござ/;
+const POLITE = /さん|様|氏|先生|先輩|ございます|でした[。！!✨\s]|でしたね|いたします|致します|ください|下さい|ですね|ますね|ですよ|ましょう|です[！!。✨♡\s]|です$|ます[！!。✨\s]|ます$|ました|ますように|ありがとうござ/;
 /* Births and children are family news, not couple talk. */
 const FAMILY = /出産|妊娠|赤ちゃん|男の子|女の子|息子|娘|子供|子ども|こども|孫|ママ友|パパ友/;
 /* Talk about works, streams and campaigns is not talk between a couple; "ALT" is a picture's caption. */
-const FAN = /拡散|リポスト|\bRT\b|フォロー|イラスト|作品|配信|推し|\bALT\b|当選|企画|プレゼント|お迎え|納品|ご依頼|スペース|リスナー|ライブ|チケット|グッズ|新曲|アルバム|\bMV\b|動画|投稿|写真集|選びました|シーン|リスペクト|曲|歌っ|歌う|ゲーム|ガチャ|イベント|タグ|呼びタメ|タメ口|タメで|お言葉に甘え|尊い|\bFGO\b|とうらぶ|くっつ[くけ]/;
+const FAN = /拡散|リポスト|\bRT\b|フォロー|イラスト|作品|配信|推し|\bALT\b|当選|企画|プレゼント|お迎え|納品|ご依頼|スペース|リスナー|ライブ|チケット|グッズ|新曲|アルバム|\bMV\b|動画|投稿|写真集|選びました|シーン|リスペクト|曲|歌っ|歌う|ゲーム|ガチャ|イベント|タグ|呼びタメ|タメ口|タメで|お言葉に甘え|尊い|\bFGO\b|とうらぶ|くっつ[くけ]|みんな|皆|ポスト|写真|解禁|戦型|対戦|勝[っちて]|かてた|負け|ランク|甘えてしま|デビュー/;
 /* Nothing of the body on this page. */
-const BODY = /ベッ[ドト]|添い寝|お風呂|風呂|脱[がぎぐい]|裸|舐|胸|尻|下着|えっち|エッチ|エロ|ホテル|お泊|泊ま|濡れ|お口|唇|くちびる|ばぶ|おっぱ|🍌|🍒|💦|🍑|🍆|🤱|👄|😛|🤤/u;
+const BODY = /ベッ[ドト]|添い寝|お風呂|風呂|脱[がぎぐい]|裸|舐|胸|尻|下着|えっち|エッチ|エロ|ホテル|お泊|泊ま|濡れ|お口|唇|くちびる|ばぶ|おっぱ|🍌|🍒|💦|🍑|🍆|🤱|👄|😛|🤤|🍼|👶/u;
 const squash = text => String(text || '').toLowerCase().replace(/[\s　"'“”‘’「」『』（）()\[\]【】、。，．,.!?！？…・:：;；\-–—~〜ｗw]+/g, '');
 const postText = st => String((st && st.text) || '').replace(/https?:\/\/\S+/g, ' ').replace(/@\w+/g, ' ').replace(/[#＃]\S+/g, ' ').replace(/\s+/g, ' ').trim();
 const handleOf = st => String((st && st.author && st.author.screen_name) || '').replace(/^@+/, '');
@@ -156,6 +156,7 @@ function romanceText(st, lang) {
 export function talkKind(text) {
   const t = String(text || '');
   if (/おは|朝だ|morning|rise and shine|sunshine|☀/i.test(t)) return 'morning';
+  if (/愛してる|あいしてる|いちゃ|イチャ|くっつ[きいこ]|甘え|一生離さない|ずっと一緒|大好き|だいすき|だいしゅき|好きだよ|すきだよ|ちゅ[ー〜♡っ！!\s]|ちゅ$|ぎゅ|i love you|love you (?:so much|more|forever)|cuddle|snuggle/i.test(t)) return 'icha';
   if (/おやす|ねんね|すや|寝る|寝よ|眠|night|sleep|dream|💤|😴/i.test(t)) return 'night';
   if (/ただいま|おかえり|おつかれ|お疲れ|がんばった|頑張った|home|welcome back/i.test(t)) return 'home';
   if (/愛してる|あいしてる|いちゃ|イチャ|くっつ[きいこ]|甘え|一生離さない|ずっと一緒|i love you|cuddle|snuggle/i.test(t)) return 'icha';

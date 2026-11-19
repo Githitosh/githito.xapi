@@ -34,7 +34,8 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { stamp, readJson, charLen, cleanText, genreOf, readEmbed } from './rules.mjs';
+import { stamp, readJson, charLen, cleanText, genreOf, readEmbed, readFixupX } from './rules.mjs';
+import { lean, spread, deal } from './pick.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -54,7 +55,8 @@ const CONF = {
   perNews: num('perNews', 8),     // replies kept for one piece of news
   headSearches: num('headSearches', 50), // searches for the news accounts' own posts (the headlines)
   headKeep: num('headKeep', 900), // headlines the file holds
-  headHours: num('headHours', 36), // a headline leaves the file after this many hours
+  headHours: num('headHours', 72), // a headline leaves the file after this many hours
+  minutes: num('minutes', 20),    // how long one run may ask: it runs every hour
   hours: num('hours', 72),        // a reply leaves the file after this many hours
   window: num('window', 4),       // hours one search covers
   back: num('back', 36),          // how many hours back the searches reach
@@ -278,13 +280,42 @@ function headOk(text, headline) {
   return !NOT_A_HEADLINE.test(text) && !SPAM.test(text) && emojiCount(headline) < 2 && !/質問箱|お届けします|募集中|配信中|放送中|発売中|公開中|好評|詳しくは|こちらから/.test(headline);
 }
 
+/* ---------- the order the page plays in ---------- */
+/* Chosen here, at random, after every collection (see pick.mjs); the page plays from the top and leaves
+   out what its reader has seen. An entry is "r" and a reply's number, or "h" and a headline's.
+   - replies: seven replies in ten, three headlines of news that gets no replies (politics, public
+     safety); one reply for a piece of news and nobody twice in any stretch of twenty.
+   - news: headlines only.
+   - genre: for each genre, its replies with its headlines among them, or its headlines alone. */
+const NO_REPLY = new Set(['politics', 'safety']);
+function newsPlay(items, news, heads) {
+  const tag = (list, t) => list.map(x => t + x.id);
+  const replies = spread(lean(items, x => (news[x.n] && news[x.n].at) || x.at, 24), x => ['n' + x.n, 'p' + String(x.h).toLowerCase()], 20);
+  const headOrder = spread(lean(heads, x => x.at || x.found, 12), x => ['l' + squash(x.t).slice(0, 12)], 30);
+  const apart = list => spread(list, x => ['s' + x.h], 3);
+  const genre = {};
+  GENRES.forEach(g => {
+    const r = replies.filter(x => news[x.n] && news[x.n].g === g);
+    const h = apart(headOrder.filter(x => x.g === g));
+    const order = r.length ? deal(tag(r, 'r'), tag(h, 'h'), 0.3) : tag(h, 'h');
+    if (order.length) genre[g] = order.slice(0, 300);
+  });
+  return {
+    made: stamp(),
+    /* The mixed order ends where the replies end: after that it would be headlines only. */
+    replies: deal(tag(replies, 'r'), tag(apart(headOrder.filter(x => NO_REPLY.has(x.g))), 'h'), 0.3, 0, true).slice(0, 900),
+    news: tag(apart(headOrder), 'h').slice(0, 600),
+    genre,
+  };
+}
+
 /* ---------- asking ---------- */
 let asked = 0;
 let readCount = 0;
 let convCount = 0;
 let timelineAsked = 0;
 let timelineGave = 0;
-const via = { vxtwitter: 0, x: 0, fxtwitter: 0 };
+const via = { vxtwitter: 0, fixupx: 0, x: 0, fxtwitter: 0 };
 class Refused extends Error {}
 async function fxJson(url) {
   let res;
@@ -326,6 +357,11 @@ async function newsPost(handle, id) {
       return { text: String(d.text), handle: d.user_screen_name || handle, at: d.date_epoch ? new Date(d.date_epoch * 1000).toISOString().replace(/\.\d+Z$/, 'Z') : '', reply: !!d.replyingToID };
     }
   } catch (e) {}
+  /* FixupX: the words and the writer, no date. */
+  try {
+    const d = await readFixupX(handle, id);
+    if (d && d.raw) { via.fixupx++; return { text: String(d.raw), handle: d.handle || handle, at: '', reply: false }; }
+  } catch (e) {}
   /* X's own embed service (publish.x.com): the words and the writer, no date. */
   try {
     const d = await readEmbed(handle, id);
@@ -358,6 +394,8 @@ async function build(lang) {
   const have = new Set(oldItems.map(x => x.id));
   const texts = new Set(oldItems.map(x => squash(x.t).slice(0, 40)));
   const count = { searches: 0, replies: 0, candidates: 0, read: 0, news: 0, items: 0, headSearches: 0, heads: 0, conversations: 0, convReplies: 0 };
+  const deadline = Date.now() + CONF.minutes * 60e3;
+  const late = () => Date.now() > deadline;
   const everyAccount = accounts.concat(HEAD_ONLY[lang] || []);
   const anyHandle = new Map(everyAccount.map(a => [a[0].toLowerCase(), a]));
 
@@ -372,6 +410,8 @@ async function build(lang) {
   const mainHeads = HEADS[lang] || [];
   const otherHeads = shuffle(accounts.map(a => a[0]).filter(h => !mainHeads.includes(h) && !(tally[h] && tally[h].tries >= 3 && !tally[h].replies)));
   for (const handle of CONF.noSearch ? [] : shuffle(mainHeads).concat(otherHeads).slice(0, CONF.headSearches)) {
+    /* The accounts take a third of the run's time at most. */
+    if (Date.now() > deadline - CONF.minutes * 40e3) { console.log('  headlines: time is up for this part'); break; }
     const a = anyHandle.get(handle.toLowerCase());
     if (!a) continue;
     let list;
@@ -423,7 +463,7 @@ async function build(lang) {
   const targets = freshPosts.concat(kept).slice(0, CONF.conversations);
   let convRefusals = 0;
   let convRests = 0;
-  for (let i = 0; i < targets.length && !CONF.noSearch; i += 3) {
+  for (let i = 0; i < targets.length && !CONF.noSearch && !late(); i += 3) {
     const batch = targets.slice(i, i + 3);
     const got = await Promise.all(batch.map(p => conversation(p.id).catch(e => { if (e instanceof Refused) return null; throw e; })));
     if (got.every(g => !g)) {
@@ -479,6 +519,7 @@ async function build(lang) {
   let rests = 0;
   for (const p of CONF.noSearch ? [] : shuffle(plan).slice(0, CONF.searches)) {
     if (cands.length >= CONF.enough) { console.log(`  ${lang}: ${cands.length} replies may play, which is enough for one run: no more searches`); break; }
+    if (late()) { console.log('  the run\'s time is up: no more searches'); break; }
     const handle = p.a[0];
     let list;
     try { list = await search(handle, lang, p.start); count.searches++; refusals = 0; }
@@ -577,7 +618,7 @@ async function build(lang) {
   const headGenres = {};
   heads.forEach(x => { headGenres[x.g || 'other'] = (headGenres[x.g || 'other'] || 0) + 1; });
   console.log(`  headlines: ${count.headSearches} searches gave ${count.heads} new; the file holds ${heads.length} ${JSON.stringify(headGenres)}`);
-  return { version: 2, lang, updated: stamp(), run: CONF.noSearch ? (before.run || null) : { at: stamp(), ...count }, genres, headGenres, accounts: tally, conv, news: usedNews, items, heads };
+  return { version: 3, lang, updated: stamp(), run: CONF.noSearch ? (before.run || null) : { at: stamp(), ...count }, genres, headGenres, accounts: tally, conv, play: newsPlay(items, usedNews, heads), news: usedNews, items, heads };
 }
 
 async function main() {
@@ -585,7 +626,7 @@ async function main() {
   for (const lang of CONF.langs.length ? CONF.langs : ['ja']) {
     console.log(`Replies to the news, ${lang}`);
     const out = await build(lang);
-    console.log(`Asked api.fxtwitter.com for ${asked} searches, ${timelineAsked} account timelines (${timelineGave} answered) and ${convCount} conversations. News posts read: ${readCount} (vxTwitter ${via.vxtwitter}, X's embed service ${via.x}, FxTwitter ${via.fxtwitter}).`);
+    console.log(`Asked api.fxtwitter.com for ${asked} searches, ${timelineAsked} account timelines (${timelineGave} answered) and ${convCount} conversations. News posts read: ${readCount} (vxTwitter ${via.vxtwitter}, FixupX ${via.fixupx}, X's embed service ${via.x}, FxTwitter ${via.fxtwitter}).`);
     if (CONF.dry) continue;
     const file = path.join(CONF.out, 'v1', `news-${lang}.json`);
     await mkdir(path.dirname(file), { recursive: true });

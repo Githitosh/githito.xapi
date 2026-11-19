@@ -37,7 +37,8 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { stamp, readJson, charLen, cleanText } from './rules.mjs';
+import { stamp, readJson, charLen, cleanText, readFixupX } from './rules.mjs';
+import { lean, spread, deal } from './pick.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -55,10 +56,10 @@ const CONF = {
   conversations: num('conversations', 260), // exchanges read whole (a post, what came before it, the replies under it)
   enough: num('enough', 100),    // a run stops asking once it has this many new stories
   keep: num('keep', 1500),       // stories the file holds
-  hours: num('hours', 120),      // a story leaves the file after this many hours (loving talk does not go stale in a day)
+  hours: num('hours', 72),       // a story leaves the file after three days
   pause: num('pause', 3000),     // milliseconds between two searches
   rest: num('rest', 240000),     // milliseconds a way in is left alone after it refuses (the others go on meanwhile)
-  minutes: num('minutes', 35),   // how long one run may last: a refusal passes in a quarter of an hour, so a run waits it out
+  minutes: num('minutes', 22),   // how long one run may last: a refusal passes in a quarter of an hour, so a run waits it out
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1',
 };
@@ -194,7 +195,7 @@ let asked = 0;
 let convAsked = 0;
 let timelineAsked = 0;
 let timelineGave = 0;
-const via = { conversation: 0, vxtwitter: 0 };
+const via = { conversation: 0, vxtwitter: 0, fixupx: 0 };
 class Refused extends Error {}
 async function fxJson(url) {
   let res;
@@ -232,17 +233,27 @@ async function timeline(handle) {
    profile (who the writer is must be known: a profile that cannot be read is not played). */
 async function parentOtherWay(handle, id) {
   try {
-    const res = await fetch(`https://api.vxtwitter.com/${handle || 'i'}/status/${id}`, { headers: { 'user-agent': 'githito.xapi collector', accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
-    const d = res.ok ? await res.json().catch(() => null) : null;
-    if (!d || !d.text || !d.user_screen_name) return null;
-    const p = await fxJson('https://api.fxtwitter.com/' + d.user_screen_name);
+    let post = null;
+    try {
+      const res = await fetch(`https://api.vxtwitter.com/${handle || 'i'}/status/${id}`, { headers: { 'user-agent': 'githito.xapi collector', accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
+      const d = res.ok ? await res.json().catch(() => null) : null;
+      if (d && d.text && d.user_screen_name) {
+        via.vxtwitter++;
+        post = { text: String(d.text), who: d.user_screen_name, name: d.user_name || '', at: Number(d.date_epoch) || 0, sensitive: !!d.possibly_sensitive, to: d.replyingToID ? { screen_name: d.replyingTo || '', status: String(d.replyingToID) } : null };
+      }
+    } catch (e) {}
+    if (!post) {
+      const d = await readFixupX(handle, id);
+      if (d && d.raw && d.handle) { via.fixupx++; post = { text: String(d.raw), who: d.handle, name: '', at: 0, sensitive: false, to: null }; }
+    }
+    if (!post) return null;
+    const p = await fxJson('https://api.fxtwitter.com/' + post.who);
     const u = p && p.user;
     if (!u) return null;
-    via.vxtwitter++;
     return {
-      id: String(id), url: `https://x.com/${d.user_screen_name}/status/${id}`, text: String(d.text), created_timestamp: Number(d.date_epoch) || 0, possibly_sensitive: !!d.possibly_sensitive,
-      author: { screen_name: d.user_screen_name, name: u.name || d.user_name || '', description: u.description || '', followers: u.followers, protected: !!u.protected },
-      replying_to: d.replyingToID ? { screen_name: d.replyingTo || '', status: String(d.replyingToID) } : null,
+      id: String(id), url: `https://x.com/${post.who}/status/${id}`, text: post.text, created_timestamp: post.at, possibly_sensitive: post.sensitive,
+      author: { screen_name: post.who, name: u.name || post.name || '', description: u.description || '', followers: u.followers, protected: !!u.protected },
+      replying_to: post.to,
     };
   } catch (e) { return null; }
 }
@@ -311,6 +322,24 @@ function pairsIn(list, lang) {
     if (pair) out.push(pair);
   });
   return out.sort((x, y) => y.score - x.score);
+}
+
+/* ---------- the order the page plays in ---------- */
+/* Chosen here, at random, after every collection (see pick.mjs); the page plays from the top and leaves
+   out what its reader has seen. Three orders, for the hour of the day:
+   - morning: seven good mornings in ten, three loving exchanges;
+   - day: seven loving exchanges in ten, three greetings of coming home;
+   - night: seven loving exchanges in ten, three good nights or welcome homes.
+   Nobody comes twice in any stretch of ten stories. */
+function humorPlay(stories) {
+  const people = s => ['p' + String(s.a.handle).toLowerCase(), 'p' + String(s.b.handle).toLowerCase()];
+  const order = list => spread(lean(list, s => s.found || s.at, 24), people, 10);
+  const ids = list => list.map(s => s.id);
+  const loving = order(stories.filter(s => s.kind === 'icha' || s.kind === 'love' || s.kind === 'miss'));
+  const mornings = order(stories.filter(s => s.kind === 'morning'));
+  const homes = order(stories.filter(s => s.kind === 'home' || s.kind === 'other'));
+  const nights = order(stories.filter(s => s.kind === 'night' || s.kind === 'home' || s.kind === 'other'));
+  return { made: stamp(), morning: ids(deal(mornings, loving, 0.3, 2, true)), day: ids(deal(loving, homes, 0.3, 2, true)), night: ids(deal(loving, nights, 0.3, 2, true)) };
 }
 
 /* ---------- one language ---------- */
@@ -495,7 +524,7 @@ async function build(lang) {
   const kinds = {};
   stories.forEach(s => { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
   console.log(`  ${lang}: ${count.searches} searches gave ${count.replies} replies, ${count.candidates} of them may play; ${count.timelines} timelines gave ${count.posts} answered posts; ${count.conversations} exchanges read whole (${count.otherWay} posts another way); ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)}.`);
-  return { version: 2, lang, updated: stamp(), run: off ? (before.run || null) : { at: stamp(), ...count }, kinds, conv, people: readAt, skip: Object.fromEntries(SKIP), stories };
+  return { version: 3, lang, updated: stamp(), run: off ? (before.run || null) : { at: stamp(), ...count }, kinds, conv, people: readAt, skip: Object.fromEntries(SKIP), play: humorPlay(stories), stories };
 }
 
 async function main() {
@@ -508,6 +537,6 @@ async function main() {
     await writeFile(path.join(CONF.out, 'v1', `humor-${lang}.json`), JSON.stringify(out) + '\n');
     await writeFile(path.join(CONF.out, '.changed'), stamp() + '\n');
   }
-  console.log(`Asked api.fxtwitter.com for ${asked} searches, ${timelineAsked} timelines (${timelineGave} answered) and ${convAsked} conversations; ${via.vxtwitter} posts read through api.vxtwitter.com.`);
+  console.log(`Asked api.fxtwitter.com for ${asked} searches, ${timelineAsked} timelines (${timelineGave} answered) and ${convAsked} conversations; posts read another way: vxTwitter ${via.vxtwitter}, FixupX ${via.fixupx}.`);
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(e => { console.error(e.message || e); process.exit(1); });

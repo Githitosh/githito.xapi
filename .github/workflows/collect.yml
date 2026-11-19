@@ -1,16 +1,18 @@
-# githito.xapi: builds the day's API at 6:00, 12:00 and 18:00 (Japan) and publishes it on the branch "api".
-# The Humor page's stories are also collected every hour, at 17 past.
-# What it collects from is set in config.json ("source"). While that is "off", only the Humor page's stories
-# (humor.mjs, config.json "humor") and the replies to the news for the News page (news.mjs, config.json "news") are made.
+# githito.xapi: collects by itself, every hour, and publishes the result on the branch "api".
+#
+# One run takes about an hour: the Humor page's stories (humor.mjs) and their publishing, what people reply to
+# the news and the headlines (news.mjs) and their publishing, then a wait until the hour is over, and the start
+# of the next run (next.mjs).
+# So the runs follow one another without anybody starting them. GitHub's own schedule starts runs hours late
+# or not at all (runs set for the hour came five hours late), which is why a run starts the next one itself;
+# the schedule below only starts things again if the chain should ever break.
+#
+# To stop it: set "loop": false in config.json (the run then ends without starting another), or disable the
+# workflow in the Actions tab.
 name: Collect
 on:
   schedule:
-    - cron: '7 21 * * *'   # 6:07 in Japan
-    - cron: '7 3 * * *'    # 12:07 in Japan
-    - cron: '7 9 * * *'    # 18:07 in Japan
-    # GitHub starts scheduled runs late, most of all on the hour and the half hour (runs set for the hour came
-    # five hours late), so none of these is on the hour.
-    - cron: '17 * * * *'   # every hour, at 17 past: the Humor page's stories only
+    - cron: '23 */3 * * *'   # every three hours, at 23 past: starts the chain again if it has stopped
   workflow_dispatch:
     inputs:
       rejudge:
@@ -25,15 +27,23 @@ on:
         description: 'News: how many reply searches this run makes (empty: as in config.json)'
         type: string
         default: ''
+      chain:
+        description: 'Start the next run when this one is done (the hourly chain)'
+        type: boolean
+        default: false
 permissions:
   contents: write
+  actions: write
+# One run at a time. A run that is waiting gives way to a newer one, so there is never more than one chain.
 concurrency:
   group: collect
   cancel-in-progress: false
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
+    env:
+      CHAIN: ${{ (github.event_name == 'schedule' || inputs.chain) && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,23 +51,41 @@ jobs:
           node-version: 20
       - name: The API as it is now
         run: |
+          echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
           mkdir -p public
           if git fetch --depth=1 origin api 2>/dev/null; then git archive FETCH_HEAD | tar -x -C public; fi
+      # The earlier collection for Reply News (collect.mjs). It is switched off in config.json ("source": "off")
+      # and runs only when a person starts a whole run by hand.
       - name: Collect
-        if: ${{ !inputs.only && github.event.schedule != '17 * * * *' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.only && !inputs.chain }}
         env:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node collect.mjs --out public
-      # The Humor page's stories (loving exchanges; greetings in their hours), made ahead so the page only reads them.
+      # The Humor page's stories (loving exchanges; greetings in their hours).
       - name: Humor stories
         if: ${{ !inputs.only || inputs.only == 'humor' }}
+        continue-on-error: true
         env:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node humor.mjs --out public
-      # What people reply to the news (the News page plays these). A failure here does not stop the publishing.
+      - name: Publish the humor stories
+        if: ${{ !inputs.only || inputs.only == 'humor' }}
+        run: |
+          cd public
+          if [ ! -f .changed ]; then echo "Nothing new to publish."; exit 0; fi
+          rm -f .changed
+          rm -rf .git
+          git init -q -b api
+          git config user.name "githito.xapi collector"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "API data $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" api
+          rm -rf .git
+      # What people reply to the news, and the headlines (the News page plays these).
       - name: Replies to the news
-        if: ${{ (!inputs.only || inputs.only == 'news') && github.event.schedule != '17 * * * *' }}
+        if: ${{ !inputs.only || inputs.only == 'news' }}
         continue-on-error: true
         env:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
@@ -74,3 +102,10 @@ jobs:
           git add -A
           git commit -q -m "API data $(date -u +%Y-%m-%dT%H:%MZ)"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" api
+      # The hourly chain (next.mjs): a run of the chain waits until an hour has passed since it began and
+      # starts the next run; a run started by hand starts the next one at once.
+      - name: Start the next run
+        if: ${{ always() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node next.mjs

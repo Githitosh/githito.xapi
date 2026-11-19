@@ -526,6 +526,24 @@ export async function readEmbed(handle, id) {
   const who = (String(data.author_url || '').match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})/i) || [])[1] || handle;
   return { id: String(id), handle: who, name: data.author_name || '', raw: wordsOf(data.html) };
 }
+/* A post read through FixupX (the same service as FxTwitter, on its other name): the page it gives to
+   link previews carries the words and the writer. The request says plainly that it is this collector. */
+export async function readFixupX(handle, id) {
+  try {
+    const res = await fetch(`https://fixupx.com/${handle || 'i'}/status/${id}`, { headers: { 'user-agent': 'githito.xapi-bot/1.0 (+https://github.com/Githitosh/githito.xapi)', accept: 'text/html' }, redirect: 'follow', signal: AbortSignal.timeout(20000) });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const meta = prop => {
+      const a = html.match(new RegExp(`<meta[^>]+property="${prop}"[^>]+content="([^"]*)"`, 'i'));
+      const b = html.match(new RegExp(`<meta[^>]+content="([^"]*)"[^>]+property="${prop}"`, 'i'));
+      return entities(((a || b || [])[1] || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+    };
+    const raw = meta('og:description').replace(/https?:\/\/\S+/g, ' ').trim();
+    if (!raw) return null;
+    const who = (meta('og:title').match(/@([A-Za-z0-9_]{1,15})/) || [])[1] || handle;
+    return { id: String(id), handle: who, raw };
+  } catch (e) { return null; }
+}
 /* The same words, whatever the spaces and marks. */
 export const sameWords = (a, b) => squash(plain(a)) === squash(plain(b));
 

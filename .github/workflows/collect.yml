@@ -1,14 +1,16 @@
 # githito.xapi: builds the day's API at 6:00, 12:00 and 18:00 (Japan) and publishes it on the branch "api".
-# The Humor page's stories are also collected every hour, at half past.
+# The Humor page's stories are also collected every hour, at 17 past.
 # What it collects from is set in config.json ("source"). While that is "off", only the Humor page's stories
 # (humor.mjs, config.json "humor") and the replies to the news for the News page (news.mjs, config.json "news") are made.
 name: Collect
 on:
   schedule:
-    - cron: '0 21 * * *'   # 6:00 in Japan
-    - cron: '0 3 * * *'    # 12:00 in Japan
-    - cron: '0 9 * * *'    # 18:00 in Japan
-    - cron: '30 * * * *'   # every hour, at half past: the Humor page's stories only
+    - cron: '7 21 * * *'   # 6:07 in Japan
+    - cron: '7 3 * * *'    # 12:07 in Japan
+    - cron: '7 9 * * *'    # 18:07 in Japan
+    # GitHub starts scheduled runs late, most of all on the hour and the half hour (runs set for the hour came
+    # five hours late), so none of these is on the hour.
+    - cron: '17 * * * *'   # every hour, at 17 past: the Humor page's stories only
   workflow_dispatch:
     inputs:
       rejudge:
@@ -42,7 +44,7 @@ jobs:
           mkdir -p public
           if git fetch --depth=1 origin api 2>/dev/null; then git archive FETCH_HEAD | tar -x -C public; fi
       - name: Collect
-        if: ${{ !inputs.only && github.event.schedule != '30 * * * *' }}
+        if: ${{ !inputs.only && github.event.schedule != '17 * * * *' }}
         env:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
@@ -55,7 +57,7 @@ jobs:
         run: node humor.mjs --out public
       # What people reply to the news (the News page plays these). A failure here does not stop the publishing.
       - name: Replies to the news
-        if: ${{ (!inputs.only || inputs.only == 'news') && github.event.schedule != '30 * * * *' }}
+        if: ${{ (!inputs.only || inputs.only == 'news') && github.event.schedule != '17 * * * *' }}
         continue-on-error: true
         env:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}

@@ -58,11 +58,12 @@ const CONF = {
   parents: num('parents', 500),   // news posts read in one run
   keep: num('keep', 2000),        // replies the file holds
   perNews: num('perNews', 8),     // replies kept for one piece of news
-  headSearches: num('headSearches', 50), // searches for the news accounts' own posts (the headlines)
-  headKeep: num('headKeep', 900), // headlines the file holds
+  headSearches: num('headSearches', 80), // news accounts read in one run (their own posts are the headlines)
+  headRest: num('headRest', 120000), // milliseconds a way to the accounts' posts is left alone after it refuses (the other goes on meanwhile)
+  headKeep: num('headKeep', 1500), // headlines the file holds: the newest (the page reads the whole file)
   translate: num('translate', 400), // headlines put into English in one run (the News page shows both)
   headHours: num('headHours', 72), // a headline leaves the file after this many hours
-  minutes: num('minutes', 10),    // how long one run may ask: it runs every half hour
+  minutes: num('minutes', 12),    // how long one run may ask: it runs every half hour
   hours: num('hours', 72),        // a reply leaves the file after this many hours
   window: num('window', 4),       // hours one search covers
   back: num('back', 36),          // how many hours back the searches reach
@@ -335,7 +336,8 @@ let translatedOdd = 0;
 function newsPlay(items, news, heads) {
   const tag = (list, t) => list.map(x => t + x.id);
   const replies = spread(lean(items, x => (news[x.n] && news[x.n].at) || x.at, 24), x => ['n' + x.n, 'p' + String(x.h).toLowerCase()], 20);
-  const headOrder = spread(lean(heads, x => x.at || x.found, 12), x => ['l' + squash(x.t).slice(0, 12)], 30);
+  /* News is for the newest: a headline's place is its age and a draw of up to three hours, no more. */
+  const headOrder = spread(lean(heads, x => x.at || x.found, 3), x => ['l' + squash(x.t).slice(0, 12)], 30);
   const apart = list => spread(list, x => ['s' + x.h], 3);
   const genre = {};
   GENRES.forEach(g => {
@@ -348,7 +350,7 @@ function newsPlay(items, news, heads) {
     made: stamp(),
     /* The mixed order ends where the replies end: after that it would be headlines only. */
     replies: deal(tag(replies, 'r'), tag(apart(headOrder.filter(x => NO_REPLY.has(x.g))), 'h'), 0.3, 0, true).slice(0, 900),
-    news: tag(apart(headOrder), 'h').slice(0, 600),
+    news: tag(apart(headOrder), 'h').slice(0, 900),
     genre,
   };
 }
@@ -376,15 +378,16 @@ async function search(handle, lang, start) {
   const data = await fxJson('https://api.fxtwitter.com/2/search?count=100&q=' + encodeURIComponent(q));
   return (data && data.results) || [];
 }
-/* An account's own latest posts. Its timeline is asked first; when that gives nothing, the search
-   (two ways to the same posts, so one being refused does not stop the run). */
-async function ownPosts(handle, lang) {
-  try {
-    timelineAsked++;
-    const d = await fxJson('https://api.fxtwitter.com/2/profile/' + handle + '/statuses?count=40');
-    const list = (d && Array.isArray(d.results)) ? d.results.filter(st => !st.reposted_by) : [];
-    if (list.length) { timelineGave++; return list; }
-  } catch (e) {}
+/* An account's own latest posts, two ways: its timeline, and a search of its posts. They are asked
+   separately, so that the one being refused leaves the other. */
+async function timelineOf(handle) {
+  timelineAsked++;
+  const d = await fxJson('https://api.fxtwitter.com/2/profile/' + handle + '/statuses?count=40');
+  const list = (d && Array.isArray(d.results)) ? d.results.filter(st => !st.reposted_by) : [];
+  if (list.length) timelineGave++;
+  return list;
+}
+async function searchOwn(handle, lang) {
   asked++;
   const data = await fxJson('https://api.fxtwitter.com/2/search?count=100&q=' + encodeURIComponent(`from:${handle} -filter:replies -filter:retweets lang:${lang}`));
   return (data && data.results) || [];
@@ -459,30 +462,29 @@ async function build(lang) {
   const everyAccount = (HEAD_ONLY[lang] || []).filter(a => !byHandle.has(a[0].toLowerCase())).concat(accounts);
   const anyHandle = new Map(everyAccount.map(a => [a[0].toLowerCase(), a]));
 
-  /* 0. The headlines: the news accounts' own latest posts. They are few searches, so they go first. */
+  /* 0. The headlines: the news accounts' own latest posts. They are collected as the Humor stories are:
+     in rounds, for the run's time, through two ways in (an account's timeline, and a search of its
+     posts). A way that refuses is left alone for a couple of minutes while the other goes on, and an
+     account that could not be read waits its turn again, so one refusal does not end the run. The
+     accounts asked for come first, then the main papers (every run), then the others, those read
+     longest ago first, so that every run reads different ones. */
   const oldHeads = (Array.isArray(before.heads) ? before.heads : []).filter(x => x && x.id && x.h && x.t);
   const haveHead = new Set(oldHeads.map(x => x.id));
   const newHeads = [];
   const posts = [];   // the news posts seen in this run: where replies are read from
-  let headRefusals = 0;
-  let headRests = 0;
-  /* The accounts asked for first, then the main papers every run, then the other accounts by turns. */
+  const readAt = {};
+  Object.entries((before.readAt && typeof before.readAt === 'object') ? before.readAt : {}).forEach(([h, at]) => { if (Date.now() - Date.parse(at || 0) < 7 * 24 * 3600e3) readAt[h] = at; });
+  const lastRead = h => Date.parse(readAt[String(h).toLowerCase()] || 0) || 0;
   const mainHeads = (HEADS[lang] || []).filter(h => !asked.has(h.toLowerCase()));
-  const otherHeads = shuffle(accounts.map(a => a[0]).filter(h => !asked.has(h.toLowerCase()) && !mainHeads.includes(h)));
-  for (const handle of CONF.noSearch ? [] : askedList.concat(shuffle(mainHeads).concat(otherHeads).slice(0, CONF.headSearches))) {
-    /* The accounts take a third of the run's time at most. */
-    if (Date.now() > deadline - CONF.minutes * 40e3) { console.log('  headlines: time is up for this part'); break; }
-    const a = anyHandle.get(handle.toLowerCase());
-    if (!a) continue;
-    let list;
-    try { list = await ownPosts(handle, lang); count.headSearches++; headRefusals = 0; }
-    catch (e) {
-      if (!(e instanceof Refused)) throw e;
-      if (++headRefusals >= CONF.patience || ++headRests > CONF.maxRests) { console.log(`  headlines ${e.message}: stopping with what was found`); break; }
-      console.log(`  headlines ${e.message}: resting`);
-      await sleep(CONF.rest);
-      continue;
-    }
+  const otherHeads = shuffle(accounts.map(a => a[0]).filter(h => !asked.has(h.toLowerCase()) && !mainHeads.includes(h))).sort((x, y) => lastRead(x) - lastRead(y));
+  const queue = askedList.concat(shuffle(mainHeads)).concat(otherHeads).slice(0, askedList.length + CONF.headSearches).map(handle => ({ handle, tries: 0 }));
+  /* With replies to read (accounts asked for) the headlines take three fifths of the time; otherwise nearly all of it. */
+  const headUntil = deadline - (askedList.length ? CONF.minutes * 24e3 : 30e3);
+  const wayRest = { timeline: 0, search: 0 };
+  const refusedTimes = { timeline: 0, search: 0 };
+  const wayOpen = w => Date.now() >= wayRest[w];
+  const refuse = (w, e) => { refusedTimes[w]++; wayRest[w] = Date.now() + CONF.headRest; console.log(`  headlines: the ${w} ${e.message}: left alone for ${Math.round(CONF.headRest / 60000)} minutes`); };
+  const takePosts = (handle, a, list) => {
     let got = 0;
     /* An account asked for that is not a news account: its name as X shows it. */
     const own = !newsAccount.has(handle.toLowerCase());
@@ -500,9 +502,33 @@ async function build(lang) {
       newHeads.push({ id, h: a[0], n: a[1], t: headline, ...(detail ? { d: detail } : {}), g: headGenre(a, text, lang), at: whenOf(st), rc: Number(st.replies) || 0, found: stamp(), ...(own ? { q: 1 } : {}) });
       got++;
     });
-    console.log(`  ${lang} headlines @${handle}: ${list.length} posts, ${got} new`);
-    await sleep(CONF.pause);
+    return got;
+  };
+  while (!CONF.noSearch && queue.length && Date.now() < headUntil) {
+    if (!wayOpen('timeline') && !wayOpen('search')) { await sleep(Math.max(5000, Math.min(20000, Math.min(wayRest.timeline, wayRest.search) - Date.now()))); continue; }
+    const job = queue.shift();
+    const a = anyHandle.get(job.handle.toLowerCase());
+    if (!a) continue;
+    let list = null;
+    let way = '';
+    if (wayOpen('timeline')) {
+      try { list = await timelineOf(job.handle); way = 'timeline'; if (!list.length) list = null; }
+      catch (e) { if (!(e instanceof Refused)) throw e; refuse('timeline', e); }
+    }
+    if (!list && wayOpen('search')) {
+      try { list = await searchOwn(job.handle, lang); way = 'search'; }
+      catch (e) { if (!(e instanceof Refused)) throw e; refuse('search', e); }
+    }
+    if (!list) { if (++job.tries < 3) queue.push(job); continue; }
+    count.headSearches++;
+    count[way === 'timeline' ? 'byTimeline' : 'bySearch'] = (count[way === 'timeline' ? 'byTimeline' : 'bySearch'] || 0) + 1;
+    readAt[job.handle.toLowerCase()] = stamp();
+    const got = takePosts(job.handle, a, list);
+    console.log(`  ${lang} headlines @${job.handle} (${way}): ${list.length} posts, ${got} new`);
+    await sleep(way === 'search' ? CONF.pause : 1500);
   }
+  if (queue.length && !CONF.noSearch) console.log(`  headlines: time is up with ${queue.length} accounts not read (they come first next time)`);
+  count.headRefused = refusedTimes;
   count.heads = newHeads.length;
 
   /* 0b. The replies under the news posts themselves. One request gives a post and about twenty of its
@@ -693,7 +719,7 @@ async function build(lang) {
   heads.forEach(x => { headGenres[x.g || 'other'] = (headGenres[x.g || 'other'] || 0) + 1; });
   console.log(`  headlines: ${count.headSearches} searches gave ${count.heads} new; the file holds ${heads.length} ${JSON.stringify(headGenres)}`);
   const askedOut = askedList.map(h => { const a = byHandle.get(h.toLowerCase()); return { h: a ? a[0] : h, n: a ? a[1] : '@' + h, news: newsAccount.has(h.toLowerCase()) }; });
-  return { version: 3, lang, updated: stamp(), run: CONF.noSearch ? (before.run || null) : { at: stamp(), ...count }, genres, headGenres, accounts: tally, asked: askedOut, conv, play: newsPlay(items, usedNews, heads), news: usedNews, items, heads };
+  return { version: 3, lang, updated: stamp(), run: CONF.noSearch ? (before.run || null) : { at: stamp(), ...count }, genres, headGenres, accounts: tally, readAt, asked: askedOut, conv, play: newsPlay(items, usedNews, heads), news: usedNews, items, heads };
 }
 
 async function main() {

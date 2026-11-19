@@ -24,6 +24,23 @@
 - 48時間たった組は消えます。最大600組。
 - `config.json` の `humor` で設定します（`"on": false` で止まります）。`source` が `off` でも、こちらは動きます。
 
+## ニュースページ用のデータ（`news-ja.json`）
+
+ニュースのページ（https://githitosh.github.io/news-shorts/ ）は、**ニュースへの返信（リプライ）**を1枚ずつ流し、
+その下に「どのニュースへのコメントか」を出します。その返信を `news.mjs` があらかじめ集めて `v1/news-ja.json` に置きます。
+ページはそれを読むだけなので、すぐ再生できます。
+
+- 探し方：ニュースのアカウント（Yahoo!ニュース、ライブドアニュース、オリコン、スポーツ紙、ねとらぼ など約70）に宛てた返信をXで検索します。
+  1回の実行で最大260回検索し（1回で約20件）、返信先のニュース投稿を1つずつ読んで見出しを取り出します。
+- 残す返信：42文字までの短いひとこと。悪口・批判・決めつけ、人を指す言い方、宣伝、相づちだけのものは外します。
+- 外すニュース：**政治・行政・国際情勢・皇室**（返信が人への言い合いになるため）、事件・事故・災害・訃報・病気・スキャンダル。
+  これらのニュースは、ページ側では従来どおり見出しとして検索して出します（返信は出しません）。
+- 1つのニュースにつき返信は8件まで。最大2000件、48時間たったものは消えます。返信が1件も取れないアカウントは3回で自動的に外れます。
+- `config.json` の `news` で設定します（`"on": false` で止まります）。
+- Actions の Run workflow で `only` に `news` と入れると、この収集だけを動かせます（`humor` も同様）。
+
+ファイルの形：`news` はニュース（`h` アカウント、`n` 名前、`t` 見出し、`g` ジャンル）、`items` は返信（`h` 書いた人、`t` 本文、`n` ニュースの番号）。
+
 ## APIの入口
 
 ブランチ `api` に置いたファイルが、そのままAPIの応答です（GitHub が配信します。鍵は要りません）。
@@ -33,6 +50,8 @@
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/talks-ja.json` | その日の会話すべて（日本語、最大500件） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/search/ja/food.json` | ジャンルごとの会話（`food` の部分がジャンル） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/match-ja.json` | マッチングニュース用：単独で読める投稿（`posts`）と、どの投稿にも合う一言（`lines`） |
+| `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/news-ja.json` | ニュースページ用：ニュースへの返信（最大2000件）と、それぞれのニュースの見出し |
+| `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/humor-ja.json` | ユーモアページ用：恋愛のやりとり（最大600組） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/index.json` | 最終更新の時刻と、ジャンルごとの件数 |
 
 ジャンル：`space` `politics` `science` `culture` `local` `entertainment` `safety` `sports` `food`

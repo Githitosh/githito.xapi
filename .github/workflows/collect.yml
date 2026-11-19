@@ -33,6 +33,7 @@ on:
 permissions:
   contents: write
   actions: write
+  issues: write
 # One run at a time. A run that is waiting gives way to a newer one, so there is never more than one chain.
 concurrency:
   group: collect
@@ -53,6 +54,14 @@ jobs:
           echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
           mkdir -p public
           if git fetch --depth=1 origin api 2>/dev/null; then git archive FETCH_HEAD | tar -x -C public; fi
+      # Requests the owner sent as issues ("account": the accounts whose replies the News page may play;
+      # "talk"): read first, so that this run already collects for them. The Ingest workflow does the same
+      # when the issue is opened, but it may have given way to a run of this chain.
+      - name: Requests sent as issues
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node ingest.mjs --out public
       # The earlier collection for Reply News (collect.mjs). It is switched off in config.json ("source": "off")
       # and runs only when a person starts a whole run by hand.
       - name: Collect

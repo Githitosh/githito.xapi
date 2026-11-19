@@ -1,5 +1,10 @@
 #!/usr/bin/env node
-/* githito.xapi: talks sent by hand.
+/* githito.xapi: talks sent by hand, and the accounts whose replies the News page may play.
+
+   An issue titled "account" lists X accounts, one on each line (@name, name or a link to the account).
+   It replaces the list in v1/accounts.json: news.mjs reads those accounts' posts and the replies under
+   them from its next run, and the News page plays them for a reader who added the account in Settings.
+   An issue titled "account" whose body is empty or "none" clears the list.
 
    The owner finds a post and its replies on X, and sends their links here as an issue titled "talk":
    the first link is the post, the links after it are replies. This program reads each link through X's
@@ -8,8 +13,9 @@
 
      node ingest.mjs                              the open issues of this repository (in the workflow)
      node ingest.mjs --urls <post> <reply> ...    one talk from links, for trying it by hand
+     node ingest.mjs --accounts @name @name ...   the account list, by hand (--accounts none clears it)
      node ingest.mjs --dry ...                    print what would be added, write nothing */
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { CJK, plain, talkPost, pickReplies, stamp, readJson, writeApi, writeIndex, young, readEmbed, genreOf } from './rules.mjs';
@@ -68,23 +74,64 @@ async function gh(method, pathname, body) {
   if (!res.ok) throw new Error(`GitHub answered ${res.status} for ${method} ${pathname}`);
   return res.status === 204 ? null : res.json();
 }
-/* Only the owner's own issues titled "talk" are read; anyone else's are left alone. */
-async function openTalks() {
+/* Only the owner's own issues titled "talk" or "account" are read; anyone else's are left alone. */
+async function openIssues() {
   const list = await gh('GET', `/repos/${REPO}/issues?state=open&creator=${encodeURIComponent(OWNER)}&per_page=50`);
-  return list.filter(i => !i.pull_request && i.user && i.user.login === OWNER && /^\s*talk\b/i.test(i.title || '')).reverse();
+  return list.filter(i => !i.pull_request && i.user && i.user.login === OWNER && /^\s*(?:talk|account)\b/i.test(i.title || '')).reverse();
+}
+
+/* ---------- the accounts whose replies may play ---------- */
+const MAX_ACCOUNTS = 8;
+const NAME = /^[A-Za-z0-9_]{1,15}$/;
+function accountsFrom(body) {
+  const out = [];
+  String(body || '').split(/\r?\n/).forEach(line => {
+    const t = line.trim();
+    if (!t || /^(?:none|なし)$/i.test(t)) return;
+    const link = t.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})(?:[\/?#]|$)/i);
+    const name = (link ? link[1] : t.replace(/^[-*・\s]+/, '').replace(/^@+/, '').split(/[\s,、]/)[0]) || '';
+    if (!NAME.test(name) || ['home', 'search', 'i', 'intent', 'share'].includes(name.toLowerCase())) return;
+    if (!out.some(n => n.toLowerCase() === name.toLowerCase())) out.push(name);
+  });
+  return out.slice(0, MAX_ACCOUNTS);
+}
+async function setAccounts(names) {
+  const file = path.join(OUT, 'v1', 'accounts.json');
+  const before = await readJson(file, { accounts: [] });
+  const since = new Map((Array.isArray(before.accounts) ? before.accounts : []).filter(a => a && a.h).map(a => [String(a.h).toLowerCase(), a.since]));
+  const accounts = names.map(h => ({ h, since: since.get(h.toLowerCase()) || stamp() }));
+  if (DRY) { console.log('accounts: ' + JSON.stringify(accounts)); return; }
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify({ version: 1, updated: stamp(), accounts }, null, 1) + '\n');
+  await writeFile(path.join(OUT, '.changed'), stamp() + '\n');
 }
 
 async function main() {
   const { genres } = JSON.parse(await readFile(path.join(HERE, 'words.json'), 'utf8'));
   const byHand = args.indexOf('--urls');
   let jobs;
-  if (byHand >= 0) jobs = [{ number: 0, body: args.slice(byHand + 1).filter(a => !a.startsWith('--')).join('\n') }];
+  const byHandAccounts = args.indexOf('--accounts');
+  if (byHandAccounts >= 0) jobs = [{ number: 0, title: 'account', body: args.slice(byHandAccounts + 1).filter(a => !a.startsWith('--')).join('\n') }];
+  else if (byHand >= 0) jobs = [{ number: 0, body: args.slice(byHand + 1).filter(a => !a.startsWith('--')).join('\n') }];
   else {
     if (!REPO || !OWNER || !process.env.GITHUB_TOKEN) { console.log('Not in the workflow and no --urls given: nothing to do.'); return; }
-    jobs = await openTalks();
+    jobs = await openIssues();
   }
   const added = {};
   for (const job of jobs) {
+    if (/^\s*account\b/i.test(job.title || '')) {
+      const names = accountsFrom(job.body);
+      await setAccounts(names);
+      const note = names.length
+        ? `The News page may play the replies to: @${names.join(', @')}. Their posts and the replies under them are read from the next run (every half hour).`
+        : 'No account: the News page plays no replies.';
+      console.log('#' + job.number + ' ' + note);
+      if (job.number && !DRY) {
+        await gh('POST', `/repos/${REPO}/issues/${job.number}/comments`, { body: note });
+        await gh('PATCH', `/repos/${REPO}/issues/${job.number}`, { state: 'closed' });
+      }
+      continue;
+    }
     const r = await talkFrom(job.body, genres);
     const note = r.error ? 'Not added. ' + r.error
       : `Added: @${r.talk.post.handle} "${r.talk.post.text.slice(0, 40)}" with ${r.talk.replies.length} repl${r.talk.replies.length === 1 ? 'y' : 'ies'} (genre: ${r.talk.genre}).`;

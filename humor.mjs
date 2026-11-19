@@ -11,19 +11,26 @@
    collected with their own searches.
 
      node humor.mjs                  build once into ./public (Japanese)
-     node humor.mjs --searches 20    fewer searches (90 unless told)
+     node humor.mjs --searches 20    fewer searches (40 unless told); --timelines, --conversations likewise
      node humor.mjs --dry            print the counts, write nothing
-     node humor.mjs --no-search      search nothing: judge the saved stories again and drop the old ones
+     node humor.mjs --no-search      ask nothing: judge the saved stories again and drop the old ones
 
-   How: the same way the page did it.
-     1. Searches of replies with loving words, each over two hours of the last two days. Greetings
-        are searched in the hours they are said: good mornings from 5 to 10 in Japan, good nights
-        from 21 to 2, welcome homes from 17 to 23.
-     2. Each reply that may play is ranked (cute ways of saying it first, plain "おはよう" last).
-     3. The post the reply answers is read, and the pair is kept when both may play: two different
-        people, neither famous, talking plainly (no polite forms, no さん: those are followers and
-        fans, not a couple), nothing violent, sexual or heavy, nothing of the body, nothing pointing
-        at school age, no talk about works, streams or campaigns.
+   It runs every hour. X is read through more than one way in, so that one being refused does not
+   stop a run, and a run stops asking once it has 100 new stories:
+     1. Searches of replies with loving words (FxTwitter), in the hours just past. Greetings are
+        searched in the hours they are said: good mornings from 5 to 10 in Japan, good nights from 21
+        to 2, welcome homes from 17 to 23.
+     2. The latest posts of people already in the file that somebody has answered (FxTwitter's
+        timeline). No search is needed for these.
+     3. Each of these is read as a whole exchange (FxTwitter's conversation: the post, what came
+        before it, the replies under it), and every post-and-reply pair in it that may play is kept:
+        two different people, neither famous, talking plainly (no polite forms, no さん: those are
+        followers and fans, not a couple), words of love or of a greeting (a heart alone is not
+        enough), nothing violent, sexual or heavy, nothing of the body, no talk about works, streams
+        or campaigns. Somebody whose posts or profile speak of school is left out altogether.
+     4. When the conversation is refused, the post a reply answers is read through vxTwitter and its
+        writer through FxTwitter's profile.
+   Nobody fills the file: four stories for one person at most, two of them from one run.
    Settings are in config.json under "humor"; "on": false turns it off. Node 20 or newer; no packages. */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -41,13 +48,16 @@ const CONF = {
   on: FILE.on !== false,
   langs: (Array.isArray(FILE.langs) ? FILE.langs : ['ja']).filter(l => l === 'ja' || l === 'en'),
   out: path.resolve(opt('out', path.join(HERE, 'public'))),
-  searches: num('searches', 90), // searches one run may make (about 20 replies each)
-  parents: num('parents', 400),  // posts read to see what a reply answers
-  keep: num('keep', 600),        // stories the file holds
+  searches: num('searches', 40), // searches one run may make (about 20 replies each)
+  timelines: num('timelines', 40), // people already in the file whose latest posts are read
+  conversations: num('conversations', 260), // exchanges read whole (a post, what came before it, the replies under it)
+  enough: num('enough', 100),    // a run stops asking once it has this many new stories
+  keep: num('keep', 1000),       // stories the file holds
   hours: num('hours', 48),       // a story leaves the file after this many hours
-  pause: num('pause', 4000),     // milliseconds between two searches
-  rest: num('rest', 90000),      // milliseconds to rest when a search is refused
-  patience: num('patience', 4),  // refusals in a row before a run stops searching
+  pause: num('pause', 3000),     // milliseconds between two searches
+  rest: num('rest', 60000),      // milliseconds to rest when a way in is refused
+  patience: num('patience', 3),  // refusals in a row before a run gives that way up
+  maxRests: num('maxRests', 3),  // rests one way in may take in a run
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1',
 };
@@ -106,11 +116,17 @@ const LOVE = {
   ja: /大好き|だいすき|だいしゅき|しゅき|好き|すき|愛して|あいして|いちゃ|イチャ|くっつ[きいこ]|甘え|会いたい|あいたい|ぎゅ|ちゅ|なでなで|よしよし|かわいい|可愛い|かっこいい|おやす|ねんね|すや|おはよ|おはおは|おっはー|おつかれ|お疲れ|ただいま|おかえり|いってらっしゃ|いってきます|気をつけて|がんばったね|ありがと|ずっと一緒|一緒に|ハグ|彼氏|彼女|旦那|嫁|♡|❤|♥|💕|💗|💓|💖|💘|💞|🥰|😘|😚|😍|🤗|💤|😴|☺/,
   en: /love you|love ya|luv u|\bily\b|cuddle|snuggle|miss you|my love|\bbabe\b|\bbaby\b|honey|sweetheart|cutie|handsome|beautiful|xoxo|xxx|forever|good ?night|night night|nighty|good ?morning|sunshine|rise and shine|sleep well|sleep tight|sweet dreams|home safe|take care|thank you|boyfriend|girlfriend|husband|wife|❤|♥|💕|💗|🥰|😘|😚|😍|🤗|💤|😴/i,
 };
+/* Words of love or of a greeting. A heart alone does not make a reply a loving one: some people end
+   every line with one. */
+const WORDS = {
+  ja: /大好き|だいすき|だいしゅき|しゅき|好き|すき|愛して|あいして|いちゃ|イチャ|くっつ[きいこ]|甘え|会いたい|あいたい|ぎゅ|ちゅ[ー〜♡っ！!\s]|ちゅ$|なでなで|よしよし|かわいい|可愛い|かっこいい|おやす|ねんね|おはよ|おはおは|おっはー|おつかれ|お疲れ|ただいま|おかえり|いってらっしゃ|いってきます|行ってらっしゃ|行ってきます|気をつけて|がんばったね|ありがと|ずっと一緒|一緒に|ハグ/,
+  en: /love you|love ya|luv u|\bily\b|cuddle|snuggle|miss you|my love|\bbabe\b|\bbaby\b|honey|sweetheart|cutie|handsome|beautiful|good ?night|night night|nighty|good ?morning|sunshine|rise and shine|sleep well|sleep tight|sweet dreams|home safe|take care|thank you/i,
+};
 const SHORT = { ja: 30, en: 90 };
 const LONG = { ja: 60, en: 180 };
 /* Not for this page: partings and quarrels, school age, children beside couple talk, innuendo. */
-const UNSAFE_ROMANCE = /浮気|不倫|別れ|離婚|ブロック|死ね|殺|嫌い|最低|ストーカー|cheat|divorce|break ?up|hate you/i;
-const YOUTH = /学校|放課後|部活|修学旅行|制服|受験|担任|学年|文化祭|体育祭|授業|テスト|先生|クラス|\bschool\b|\bprom\b|\bhomework\b|\bgrade\b|\bclass\b|\bteacher\b/i;
+const UNSAFE_ROMANCE = /カニバ|食べちゃ|浮気|不倫|別れ|離婚|ブロック|死ね|殺|嫌い|最低|ストーカー|cheat|divorce|break ?up|hate you/i;
+const YOUTH = /がこお[わつ]|がっこ[うー]|ガッコ|下校|登校|給食|宿題|勉強|塾|中間テスト|期末|模試|内申|学校|放課後|部活|修学旅行|制服|受験|担任|学年|文化祭|体育祭|授業|テスト|先生|クラス|\bschool\b|\bprom\b|\bhomework\b|\bgrade\b|\bclass\b|\bteacher\b/i;
 const MINOR_BIO = /(?:^|[^0-9])1[0-7]\s*(?:歳|才|y\/?o\b|years? old)|高[1-3１-３一二三](?:$|[^0-9０-９])|中[1-3１-３一二三](?:$|[^0-9０-９])|高校|中学|小学|学生|ＪＫ|ＪＣ|[LSF]?JK|\bJC\b|\bDK\b|\bminor\b|\bunder ?18\b|\bteen\b/i;
 /* An age in the words: nothing that may be about somebody under age plays here. */
 const AGE = /(?:^|[^0-9０-９\/:.月])(?:1[0-9]|[1-9])\s*(?:歳|才|さい)|(?:^|[^0-9０-９\/:.月])1[0-9](?:だね|になっ|にな[るり]|[?？])|未成年|十代|10代/;
@@ -124,7 +140,7 @@ const POLITE = /さん|様|氏|先生|先輩|ございます|でした[。！!�
 /* Births and children are family news, not couple talk. */
 const FAMILY = /出産|妊娠|赤ちゃん|男の子|女の子|息子|娘|子供|子ども|こども|孫|ママ友|パパ友/;
 /* Talk about works, streams and campaigns is not talk between a couple; "ALT" is a picture's caption. */
-const FAN = /拡散|リポスト|\bRT\b|フォロー|イラスト|作品|配信|推し|\bALT\b|当選|企画|プレゼント|お迎え|納品|ご依頼|スペース|リスナー|ライブ|チケット|グッズ|新曲|アルバム|\bMV\b|動画|投稿|写真集|選びました|シーン|リスペクト|曲|歌っ|歌う|ゲーム|ガチャ|イベント|タグ|呼びタメ|タメ口|タメで|お言葉に甘え|尊い|\bFGO\b|とうらぶ|くっつ[くけ]|みんな|皆|ポスト|写真|解禁|戦型|対戦|勝[っちて]|かてた|負け|ランク|甘えてしま|デビュー/;
+const FAN = /拡散|リポスト|\bRT\b|フォロー|イラスト|作品|配信|推し|\bALT\b|当選|企画|プレゼント|お迎え|納品|ご依頼|スペース|リスナー|ライブ|チケット|グッズ|新曲|アルバム|\bMV\b|動画|投稿|写真集|てぇてぇ|てえてえ|尊[いすみ]|メンバー|キャプテン|センター|ペア|コンビ|選びました|シーン|リスペクト|曲|歌っ|歌う|ゲーム|ガチャ|イベント|タグ|呼びタメ|タメ口|タメで|お言葉に甘え|尊い|\bFGO\b|とうらぶ|くっつ[くけ]|みんな|皆|ポスト|写真|解禁|戦型|対戦|勝[っちて]|かてた|負け|ランク|甘えてしま|デビュー/;
 /* Nothing of the body on this page. */
 const BODY = /ベッ[ドト]|添い寝|お風呂|風呂|脱[がぎぐい]|裸|舐|胸|尻|下着|えっち|エッチ|エロ|ホテル|お泊|泊ま|濡れ|お口|唇|くちびる|ばぶ|おっぱ|🍌|🍒|💦|🍑|🍆|🤱|👄|😛|🤤|🍼|👶/u;
 const squash = text => String(text || '').toLowerCase().replace(/[\s　"'“”‘’「」『』（）()\[\]【】、。，．,.!?！？…・:：;；\-–—~〜ｗw]+/g, '');
@@ -166,8 +182,18 @@ export function talkKind(text) {
 }
 
 /* ---------- asking ---------- */
+/* X is read through more than one way in, so that one of them being refused does not stop a run:
+   - FxTwitter's search finds loving replies;
+   - FxTwitter's conversation gives a post together with what came before it and the replies under
+     it, so one request gives the whole exchange (and needs no search for what follows);
+   - FxTwitter's timeline gives the latest posts of people already in the file;
+   - when the conversation is refused, the post a reply answers is read through vxTwitter and its
+     writer through FxTwitter's profile. */
 let asked = 0;
-let readCount = 0;
+let convAsked = 0;
+let timelineAsked = 0;
+let timelineGave = 0;
+const via = { conversation: 0, vxtwitter: 0 };
 class Refused extends Error {}
 async function fxJson(url) {
   let res;
@@ -183,25 +209,99 @@ async function search(q, lang, start) {
   const data = await fxJson('https://api.fxtwitter.com/2/search?count=100&q=' + encodeURIComponent(`${q} filter:replies -filter:retweets -filter:links lang:${lang} since_time:${start} until_time:${start + 7200}`));
   return (data && data.results) || [];
 }
-/* The post a reply answers. */
-async function status(id) {
-  readCount++;
+/* An exchange: the post, the posts before it, and the replies under it. */
+async function conversation(id) {
+  convAsked++;
+  const d = await fxJson('https://api.fxtwitter.com/2/conversation/' + id);
+  const list = [];
+  if (d && d.status) list.push(d.status);
+  ((d && Array.isArray(d.thread)) ? d.thread : []).forEach(st => list.push(st));
+  ((d && Array.isArray(d.replies)) ? d.replies : []).forEach(st => list.push(st));
+  return list;
+}
+/* A person's own latest posts. */
+async function timeline(handle) {
+  timelineAsked++;
+  const d = await fxJson('https://api.fxtwitter.com/2/profile/' + handle + '/statuses?count=40');
+  const list = ((d && Array.isArray(d.results)) ? d.results : []).filter(st => !st.reposted_by && handleOf(st).toLowerCase() === handle.toLowerCase());
+  if (list.length) timelineGave++;
+  return list;
+}
+/* The post a reply answers, another way: its words through vxTwitter, its writer through FxTwitter's
+   profile (who the writer is must be known: a profile that cannot be read is not played). */
+async function parentOtherWay(handle, id) {
   try {
-    const d = await fxJson('https://api.fxtwitter.com/2/status/' + id);
-    return (d && (d.status || d.tweet)) || null;
+    const res = await fetch(`https://api.vxtwitter.com/${handle || 'i'}/status/${id}`, { headers: { 'user-agent': 'githito.xapi collector', accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
+    const d = res.ok ? await res.json().catch(() => null) : null;
+    if (!d || !d.text || !d.user_screen_name) return null;
+    const p = await fxJson('https://api.fxtwitter.com/' + d.user_screen_name);
+    const u = p && p.user;
+    if (!u) return null;
+    via.vxtwitter++;
+    return {
+      id: String(id), url: `https://x.com/${d.user_screen_name}/status/${id}`, text: String(d.text), created_timestamp: Number(d.date_epoch) || 0, possibly_sensitive: !!d.possibly_sensitive,
+      author: { screen_name: d.user_screen_name, name: u.name || d.user_name || '', description: u.description || '', followers: u.followers, protected: !!u.protected },
+      replying_to: d.replyingToID ? { screen_name: d.replyingTo || '', status: String(d.replyingToID) } : null,
+    };
   } catch (e) { return null; }
 }
-/* The start of a two-hour window: for a kind with hours, one of those hours (Japan) today or on one of
-   the two days before, not in the future; otherwise any time in the last two days. */
+const whenOf = st => { const t = st && (st.created_timestamp ? st.created_timestamp * 1000 : Date.parse(st.created_at || '')); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString().replace(/\.\d+Z$/, 'Z') : ''; };
+/* The start of a two-hour window. Loving talk: the hours just past, so that every run finds what is
+   new. A greeting: the hours just past when they are its hours (Japan); otherwise one of its hours
+   today or on one of the two days before. */
 function windowStart(hours) {
   const now = Math.floor(Date.now() / 1000);
-  if (!hours) return now - 7200 - Math.floor(Math.random() * 44) * 3600;
+  if (!hours) return now - 7200 - Math.floor(Math.random() * 7) * 3600;
+  const recent = [2, 3, 4].map(h => now - h * 3600).filter(t => hours.includes(Math.floor(((t + 9 * 3600) % 86400) / 3600)));
+  if (recent.length) return recent[Math.floor(Math.random() * recent.length)];
   const jstMidnight = Math.floor((now + 9 * 3600) / 86400) * 86400 - 9 * 3600;
   for (let k = 0; k < 40; k++) {
     const t = jstMidnight - Math.floor(Math.random() * 3) * 86400 + hours[Math.floor(Math.random() * hours.length)] * 3600;
     if (t + 7200 <= now && now - t < 60 * 3600) return t;
   }
   return now - 7200 - Math.floor(Math.random() * 44) * 3600;
+}
+/* A greeting is searched most in its own hours; outside them it gets a third of its share. */
+const inItsHours = hours => { const h = Math.floor(((Date.now() / 1000 - 2 * 3600 + 9 * 3600) % 86400) / 3600); return !hours || hours.includes(h) || hours.includes((h + 23) % 24); };
+
+/* ---------- pairs ---------- */
+const replyScore = (text, lang) => (charLen(text) <= SHORT[lang] ? 4 : 0) + (CUTE[lang].test(text) ? 5 : 0) + (ICHA[lang].test(text) ? 6 : 0) + (PLAIN[lang].test(text) ? -5 : 0) + Math.random() * 3;
+/* A post and the reply to it, when both may play: two different people, neither famous, the reply a
+   loving one, and the post loving, short, or itself an answer to the same person. */
+function pairFrom(pst, cst, lang) {
+  const aHandle = handleOf(pst), bHandle = handleOf(cst), aId = statusId(pst), bId = statusId(cst);
+  if (!aHandle || !bHandle || !aId || !bId || aHandle.toLowerCase() === bHandle.toLowerCase()) return null;
+  const aText = romanceText(pst, lang), bText = romanceText(cst, lang);
+  if (!aText || !bText || charLen(aText) > LONG[lang] || charLen(bText) > LONG[lang]) return null;
+  if (!LOVE[lang].test(bText) || !(WORDS[lang].test(bText) || WORDS[lang].test(aText)) || followers(pst) > 20000 || followers(cst) > 20000) return null;
+  const mutual = parentOf(pst).who.toLowerCase() === bHandle.toLowerCase();
+  if (!LOVE[lang].test(aText) && !mutual && charLen(aText) > (lang === 'en' ? 40 : 16)) return null;
+  if (PLAIN[lang].test(aText) && PLAIN[lang].test(bText)) return null;
+  const score = replyScore(bText, lang) + (CUTE[lang].test(aText) ? 4 : 0) + (ICHA[lang].test(aText) ? 4 : 0) + (mutual ? 6 : 0);
+  return {
+    id: bId, kind: talkKind(aText + ' ' + bText), mutual, score: Math.round(score * 10) / 10,
+    a: { handle: aHandle, text: aText, url: pst.url || `https://x.com/${aHandle}/status/${aId}`, id: aId },
+    b: { handle: bHandle, text: bText, url: cst.url || `https://x.com/${bHandle}/status/${bId}`, id: bId },
+    at: whenOf(cst), found: stamp(),
+  };
+}
+/* Somebody whose posts or profile speak of school is left out altogether, whatever else they write. */
+const SKIP = new Map();
+const speaksOfSchool = st => { const a = (st && st.author) || {}; return YOUTH.test(String((st && st.text) || '')) || AGE.test(String((st && st.text) || '')) || MINOR_BIO.test(String(a.description || '') + ' ' + String(a.name || '')); };
+function noteYouth(list) { list.forEach(st => { const h = handleOf(st).toLowerCase(); if (h && speaksOfSchool(st)) SKIP.set(h, stamp()); }); }
+const skipped = handle => SKIP.has(String(handle || '').toLowerCase());
+/* Every post-and-reply pair among the posts of one exchange, the best first. */
+function pairsIn(list, lang) {
+  noteYouth(list);
+  const byId = new Map();
+  list.forEach(st => { const id = statusId(st); if (id && !byId.has(id)) byId.set(id, st); });
+  const out = [];
+  byId.forEach(cst => {
+    const pst = byId.get(parentOf(cst).id);
+    const pair = pst && !skipped(handleOf(pst)) && !skipped(handleOf(cst)) ? pairFrom(pst, cst, lang) : null;
+    if (pair) out.push(pair);
+  });
+  return out.sort((x, y) => y.score - x.score);
 }
 
 /* ---------- one language ---------- */
@@ -210,20 +310,35 @@ async function build(lang) {
   const before = await readJson(file, { stories: [] });
   const old = (Array.isArray(before.stories) ? before.stories : []).filter(s => s && s.id && s.a && s.b && s.a.text && s.b.text);
   const have = new Set(old.flatMap(s => [s.id, s.a.id]));
-  const count = { searches: 0, replies: 0, candidates: 0, read: 0, stories: 0 };
-  /* 1. The searches, each kind by its share. */
+  const texts = new Set(old.flatMap(s => [squash(s.a.text).slice(0, 50), squash(s.b.text).slice(0, 50)]));
+  /* What has been read as an exchange in the last two days is not read again. */
+  const conv = {};
+  Object.entries((before.conv && typeof before.conv === 'object') ? before.conv : {}).forEach(([id, at]) => { if (Date.now() - Date.parse(at || 0) < CONF.hours * 3600e3) conv[id] = at; });
+  const count = { searches: 0, replies: 0, candidates: 0, timelines: 0, posts: 0, conversations: 0, otherWay: 0, stories: 0 };
+  /* People left out in the last two weeks stay out. */
+  Object.entries((before.skip && typeof before.skip === 'object') ? before.skip : {}).forEach(([h, at]) => { if (Date.now() - Date.parse(at || 0) < 14 * 24 * 3600e3) SKIP.set(h, at); });
+  /* Nobody fills the file: four stories for one person at most, two of them from one run. */
+  const perPerson = new Map();
+  const perRun = new Map();
+  old.forEach(s => [s.a.handle, s.b.handle].forEach(h => { const k = String(h).toLowerCase(); perPerson.set(k, (perPerson.get(k) || 0) + 1); }));
+  const off = CONF.noSearch;
+
+  /* 1. Searches of loving replies, each kind by its share, in the hours just past. */
   const plan = [];
-  (SEARCHES[lang] || []).forEach(k => { const n = Math.max(1, Math.round(CONF.searches * k.share)); for (let i = 0; i < n; i++) plan.push({ kind: k.kind, q: k.q[i % k.q.length], start: windowStart(k.hours) }); });
+  (SEARCHES[lang] || []).forEach(k => {
+    const n = Math.max(1, Math.round(CONF.searches * k.share * (inItsHours(k.hours) ? 1 : 1 / 3)));
+    for (let i = 0; i < n; i++) plan.push({ kind: k.kind, q: k.q[i % k.q.length], start: windowStart(k.hours) });
+  });
   const cands = [];
   const seen = new Set();
   let refusals = 0;
-  let rests = 0; // refusals that come and go must not make a run last for hours: six rests at most
-  for (const p of CONF.noSearch ? [] : shuffle(plan)) {
+  let rests = 0;
+  for (const p of off ? [] : shuffle(plan).slice(0, CONF.searches)) {
     let list;
     try { list = await search(p.q, lang, p.start); count.searches++; refusals = 0; }
     catch (e) {
       if (!(e instanceof Refused)) throw e;
-      if (++refusals >= CONF.patience || ++rests > 6) { console.log(`  search ${e.message}: stopping with what was found`); break; }
+      if (++refusals >= CONF.patience || ++rests > CONF.maxRests) { console.log(`  search ${e.message}: going on without more searches`); break; }
       console.log(`  search ${e.message}: resting`);
       await sleep(CONF.rest);
       continue;
@@ -238,64 +353,112 @@ async function build(lang) {
       if (!handle || !text || !id || !parent.id || !LOVE[lang].test(text) || charLen(text) > LONG[lang]) return;
       if (followers(st) > 20000 || parent.who.toLowerCase() === handle.toLowerCase()) return;
       const tk = squash(text).slice(0, 50);
-      if (seen.has(id) || seen.has(tk) || have.has(id) || have.has(parent.id)) return;
+      if (seen.has(id) || seen.has(tk) || have.has(id) || have.has(parent.id) || conv[id]) return;
       seen.add(id);
       seen.add(tk);
-      const score = (charLen(text) <= SHORT[lang] ? 4 : 0) + (CUTE[lang].test(text) ? 5 : 0) + (ICHA[lang].test(text) ? 6 : 0) + (PLAIN[lang].test(text) ? -5 : 0) + Math.random() * 3;
-      cands.push({ want: p.kind, b: { handle, text, url: st.url || `https://x.com/${handle}/status/${id}`, id }, at: st.created_at ? new Date(st.created_at).toISOString() : '', parent, score });
+      cands.push({ want: p.kind, id, st, parent, score: replyScore(text, lang) });
       got++;
     });
     console.log(`  ${lang} ${p.kind} "${p.q.slice(0, 28)}…": ${list.length} replies, ${got} may play (${cands.length} so far)`);
     await sleep(CONF.pause);
   }
   count.candidates = cands.length;
-  /* 2. The best of each kind first, so that no kind is left without stories when the reading stops. */
+
+  /* 2. People already in the file: their latest posts that somebody has answered. No search is needed
+     for these, so a run finds new exchanges even when every search is refused. */
+  const people = shuffle([...new Set(old.map(s => s.a.handle))]).slice(0, CONF.timelines);
+  const posts = [];
+  refusals = 0;
+  rests = 0;
+  for (const handle of off ? [] : people) {
+    let list;
+    try { list = await timeline(handle); count.timelines++; refusals = 0; }
+    catch (e) {
+      if (!(e instanceof Refused)) throw e;
+      if (++refusals >= CONF.patience || ++rests > CONF.maxRests) { console.log(`  timelines ${e.message}: going on without more`); break; }
+      await sleep(Math.min(CONF.rest, 20000));
+      continue;
+    }
+    noteYouth(list);
+    if (skipped(handle)) continue;
+    list.forEach(st => {
+      const id = statusId(st);
+      const text = romanceText(st, lang);
+      if (!id || !text || parentOf(st).id || have.has(id) || conv[id] || seen.has(id)) return;
+      if ((Number(st.replies) || 0) < 1 || charLen(text) > LONG[lang] || followers(st) > 20000) return;
+      if (Date.now() - Date.parse(whenOf(st) || 0) > 30 * 3600e3) return;
+      seen.add(id);
+      posts.push({ id, st, replies: Number(st.replies) || 0 });
+    });
+    await sleep(1200);
+  }
+  count.posts = posts.length;
+  console.log(`  ${lang} timelines: ${count.timelines} of ${people.length} people read, ${posts.length} answered posts`);
+
+  /* 3. What is read whole: the replies found by search (the best of each kind in turn), the answered
+     posts, and the newest exchanges of the file, which may have gone on since. */
   const byKind = {};
   cands.sort((x, y) => y.score - x.score).forEach(c => { (byKind[c.want] = byKind[c.want] || []).push(c); });
   const ranked = [];
-  for (let k = 0; ranked.length < CONF.parents && Object.values(byKind).some(l => l[k]); k++) Object.values(byKind).forEach(l => { if (l[k] && ranked.length < CONF.parents) ranked.push(l[k]); });
-  /* 3. The post each reply answers; the pair is kept when both may play. */
+  for (let k = 0; Object.values(byKind).some(l => l[k]); k++) Object.values(byKind).forEach(l => { if (l[k]) ranked.push(l[k]); });
+  const again = old.filter(s => s.mutual && !conv[s.id] && Date.now() - Date.parse(s.found || 0) < 6 * 3600e3).slice(0, 40).map(s => ({ id: s.id }));
+  const reading = [];
+  posts.sort((x, y) => y.replies - x.replies);
+  for (let k = 0; k < Math.max(ranked.length, posts.length); k++) { if (ranked[k]) reading.push(ranked[k]); if (posts[k]) reading.push(posts[k]); }
+  again.forEach(x => reading.push(x));
+  const todo = reading.slice(0, CONF.conversations);
+
+  /* 4. Each exchange, and the pairs in it that may play (two at most from one exchange). */
   const found = [];
-  const texts = new Set(old.flatMap(s => [squash(s.a.text).slice(0, 50), squash(s.b.text).slice(0, 50)]));
-  for (let i = 0; i < ranked.length; i += 4) {
-    const batch = ranked.slice(i, i + 4);
-    const posts = await Promise.all(batch.map(c => status(c.parent.id)));
-    posts.forEach((pst, k) => {
-      const c = batch[k];
-      if (!pst) return;
-      count.read++;
-      const aText = romanceText(pst, lang);
-      const aHandle = handleOf(pst) || c.parent.who;
-      const atk = squash(aText).slice(0, 50);
-      if (!aText || !aHandle || aHandle.toLowerCase() === c.b.handle.toLowerCase() || charLen(aText) > LONG[lang] || followers(pst) > 20000) return;
-      if (texts.has(atk) || texts.has(squash(c.b.text).slice(0, 50))) return;
-      /* The post answers the same person: the two are talking with each other. */
-      const mutual = parentOf(pst).who.toLowerCase() === c.b.handle.toLowerCase();
-      if (!LOVE[lang].test(aText) && !mutual && charLen(aText) > (lang === 'en' ? 40 : 16)) return;
-      /* Two plain greetings say nothing. */
-      if (PLAIN[lang].test(aText) && PLAIN[lang].test(c.b.text)) return;
-      texts.add(atk);
-      texts.add(squash(c.b.text).slice(0, 50));
-      const aId = statusId(pst) || c.parent.id;
-      const both = (CUTE[lang].test(aText) ? 4 : 0) + (ICHA[lang].test(aText) ? 4 : 0) + (mutual ? 6 : 0);
-      found.push({
-        id: c.b.id, kind: talkKind(aText + ' ' + c.b.text), mutual, score: Math.round((c.score + both) * 10) / 10,
-        a: { handle: aHandle, text: aText, url: pst.url || `https://x.com/${aHandle}/status/${aId}`, id: aId },
-        b: c.b, at: c.at, found: stamp(),
-      });
+  const keep = pair => {
+    const ak = squash(pair.a.text).slice(0, 50), bk = squash(pair.b.text).slice(0, 50);
+    if (have.has(pair.id) || texts.has(ak) || texts.has(bk)) return false;
+    const who = [pair.a.handle, pair.b.handle].map(h => String(h).toLowerCase());
+    if (who.some(h => skipped(h) || (perPerson.get(h) || 0) >= 4 || (perRun.get(h) || 0) >= 2)) return false;
+    who.forEach(h => { perPerson.set(h, (perPerson.get(h) || 0) + 1); perRun.set(h, (perRun.get(h) || 0) + 1); });
+    have.add(pair.id);
+    texts.add(ak);
+    texts.add(bk);
+    found.push(pair);
+    return true;
+  };
+  refusals = 0;
+  rests = 0;
+  for (let i = 0; i < todo.length && !off; i += 3) {
+    if (found.length >= CONF.enough) { console.log(`  ${lang}: ${found.length} new stories, which is enough for one run`); break; }
+    const batch = todo.slice(i, i + 3);
+    const got = await Promise.all(batch.map(x => conversation(x.id).catch(e => { if (e instanceof Refused) return null; throw e; })));
+    if (got.every(g => !g)) {
+      /* Refused: the reply's own post another way, then a rest. */
+      const others = await Promise.all(batch.map(x => (x.st && x.parent ? parentOtherWay(x.parent.who, x.parent.id) : null)));
+      others.forEach((pst, k) => { if (!pst) return; count.otherWay++; noteYouth([pst, batch[k].st]); const pair = pairFrom(pst, batch[k].st, lang); if (pair) keep(pair); });
+      if (++refusals >= CONF.patience || ++rests > CONF.maxRests) { console.log('  conversations refused: stopping with what was found'); break; }
+      await sleep(Math.min(CONF.rest, 30000));
+      continue;
+    }
+    refusals = 0;
+    got.forEach((list, k) => {
+      if (!list) return;
+      count.conversations++;
+      via.conversation++;
+      conv[batch[k].id] = stamp();
+      let n = 0;
+      pairsIn(list, lang).forEach(pair => { if (n < 2 && keep(pair)) n++; });
     });
+    await sleep(1500);
   }
   count.stories = found.length;
+
   /* The file: this run's stories and the earlier ones that are still young and still may play. */
   const fresh = s => Date.now() - Date.parse(s.found || 0) < CONF.hours * 3600e3;
   const pairText = s => s.a.text + ' ' + s.b.text;
   const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !AGE.test(s.a.text) && !AGE.test(s.b.text) && !EMOJI_HINT.test(pairText(s))
     && !FAN.test(pairText(s)) && !BODY.test(pairText(s)) && !FAMILY.test(pairText(s)) && (lang === 'en' || (!POLITE.test(s.a.text) && !POLITE.test(s.b.text)));
-  const stories = found.concat(old.filter(s => fresh(s) && ok(s)).map(s => ({ ...s, kind: talkKind(pairText(s)) }))).slice(0, CONF.keep);
+  const stories = found.filter(s => !skipped(s.a.handle) && !skipped(s.b.handle)).concat(old.filter(s => fresh(s) && ok(s) && !skipped(s.a.handle) && !skipped(s.b.handle)).map(s => ({ ...s, kind: talkKind(pairText(s)) }))).slice(0, CONF.keep);
   const kinds = {};
   stories.forEach(s => { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
-  console.log(`  ${lang}: ${count.searches} searches gave ${count.replies} replies; ${count.candidates} may play; ${count.read} posts read; ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)}.`);
-  return { version: 1, lang, updated: stamp(), run: CONF.noSearch ? (before.run || null) : { at: stamp(), ...count }, kinds, stories };
+  console.log(`  ${lang}: ${count.searches} searches gave ${count.replies} replies, ${count.candidates} of them may play; ${count.timelines} timelines gave ${count.posts} answered posts; ${count.conversations} exchanges read whole (${count.otherWay} posts another way); ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)}.`);
+  return { version: 2, lang, updated: stamp(), run: off ? (before.run || null) : { at: stamp(), ...count }, kinds, conv, skip: Object.fromEntries(SKIP), stories };
 }
 
 async function main() {
@@ -308,6 +471,6 @@ async function main() {
     await writeFile(path.join(CONF.out, 'v1', `humor-${lang}.json`), JSON.stringify(out) + '\n');
     await writeFile(path.join(CONF.out, '.changed'), stamp() + '\n');
   }
-  console.log(`Asked api.fxtwitter.com for ${asked} searches and ${readCount} posts.`);
+  console.log(`Asked api.fxtwitter.com for ${asked} searches, ${timelineAsked} timelines (${timelineGave} answered) and ${convAsked} conversations; ${via.vxtwitter} posts read through api.vxtwitter.com.`);
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(e => { console.error(e.message || e); process.exit(1); });

@@ -51,11 +51,11 @@ const CONF = {
   langs: (Array.isArray(FILE.langs) ? FILE.langs : ['ja']).filter(l => l === 'ja' || l === 'en'),
   out: path.resolve(opt('out', path.join(HERE, 'public'))),
   searches: num('searches', 40), // searches one run may make (about 20 replies each)
-  timelines: num('timelines', 40), // people already in the file whose latest posts are read
+  timelines: num('timelines', 60), // people whose latest posts are read (those in the file and those met in the exchanges)
   conversations: num('conversations', 260), // exchanges read whole (a post, what came before it, the replies under it)
   enough: num('enough', 100),    // a run stops asking once it has this many new stories
-  keep: num('keep', 1000),       // stories the file holds
-  hours: num('hours', 48),       // a story leaves the file after this many hours
+  keep: num('keep', 1500),       // stories the file holds
+  hours: num('hours', 120),      // a story leaves the file after this many hours (loving talk does not go stale in a day)
   pause: num('pause', 3000),     // milliseconds between two searches
   rest: num('rest', 240000),     // milliseconds a way in is left alone after it refuses (the others go on meanwhile)
   minutes: num('minutes', 35),   // how long one run may last: a refusal passes in a quarter of an hour, so a run waits it out
@@ -269,15 +269,23 @@ const inItsHours = hours => { const h = Math.floor(((Date.now() / 1000 - 2 * 360
 const replyScore = (text, lang) => (charLen(text) <= SHORT[lang] ? 4 : 0) + (CUTE[lang].test(text) ? 5 : 0) + (ICHA[lang].test(text) ? 6 : 0) + (PLAIN[lang].test(text) ? -5 : 0) + Math.random() * 3;
 /* A post and the reply to it, when both may play: two different people, neither famous, the reply a
    loving one, and the post loving, short, or itself an answer to the same person. */
+/* Why pairs were not kept, counted for the run's log. */
+const WHY = {};
+const why = reason => { WHY[reason] = (WHY[reason] || 0) + 1; return null; };
 function pairFrom(pst, cst, lang) {
   const aHandle = handleOf(pst), bHandle = handleOf(cst), aId = statusId(pst), bId = statusId(cst);
-  if (!aHandle || !bHandle || !aId || !bId || aHandle.toLowerCase() === bHandle.toLowerCase()) return null;
+  if (!aHandle || !bHandle || !aId || !bId) return why('no id');
+  if (aHandle.toLowerCase() === bHandle.toLowerCase()) return why('same person');
   const aText = romanceText(pst, lang), bText = romanceText(cst, lang);
-  if (!aText || !bText || charLen(aText) > LONG[lang] || charLen(bText) > LONG[lang]) return null;
-  if (!LOVE[lang].test(bText) || !(WORDS[lang].test(bText) || WORDS[lang].test(aText)) || followers(pst) > 20000 || followers(cst) > 20000) return null;
+  if (!aText) return why('the post may not play');
+  if (!bText) return why('the reply may not play');
+  if (charLen(aText) > LONG[lang] || charLen(bText) > LONG[lang]) return why('too long');
+  if (followers(pst) > 20000 || followers(cst) > 20000) return why('famous');
+  if (!LOVE[lang].test(bText)) return why('the reply is not loving');
+  if (!(WORDS[lang].test(bText) || WORDS[lang].test(aText))) return why('a heart but no words');
   const mutual = parentOf(pst).who.toLowerCase() === bHandle.toLowerCase();
-  if (!LOVE[lang].test(aText) && !mutual && charLen(aText) > (lang === 'en' ? 40 : 16)) return null;
-  if (PLAIN[lang].test(aText) && PLAIN[lang].test(bText)) return null;
+  if (!LOVE[lang].test(aText) && !mutual && charLen(aText) > (lang === 'en' ? 40 : 16)) return why('the post is about something else');
+  if (PLAIN[lang].test(aText) && PLAIN[lang].test(bText)) return why('two plain greetings');
   const score = replyScore(bText, lang) + (CUTE[lang].test(aText) ? 4 : 0) + (ICHA[lang].test(aText) ? 4 : 0) + (mutual ? 6 : 0);
   return {
     id: bId, kind: talkKind(aText + ' ' + bText), mutual, score: Math.round(score * 10) / 10,
@@ -331,19 +339,24 @@ async function build(lang) {
     for (let i = 0; i < n; i++) plan.push({ kind: k.kind, q: k.q[i % k.q.length], start: windowStart(k.hours) });
   });
   const searches = shuffle(plan).slice(0, CONF.searches);
-  /* People already in the file: their latest posts that somebody has answered need no search. */
-  const people = shuffle([...new Set(old.map(s => s.a.handle))]).filter(h => !skipped(h)).slice(0, CONF.timelines);
+  /* People whose latest posts are read (those that somebody has answered need no search): both sides
+     of the stories in the file, and whoever is met in the exchanges read in this run. Those never read
+     come first, then those read longest ago, so every run asks different people. */
+  const readAt = {};
+  Object.entries((before.people && typeof before.people === 'object') ? before.people : {}).forEach(([h, at]) => { if (Date.now() - Date.parse(at || 0) < 7 * 24 * 3600e3) readAt[h] = at; });
+  const known = new Set();
+  const people = [];
+  const meet = handle => { const h = String(handle || ''); const k = h.toLowerCase(); if (!h || known.has(k) || skipped(h)) return; known.add(k); people.push(h); };
+  shuffle(old.flatMap(s => [s.a.handle, s.b.handle])).sort((x, y) => (Date.parse(readAt[x.toLowerCase()] || 0) || 0) - (Date.parse(readAt[y.toLowerCase()] || 0) || 0)).forEach(meet);
   const cands = [];   // loving replies found by search, to be read as exchanges
   const posts = [];   // answered posts from the timelines, to be read as exchanges
-  /* The newest exchanges of the file may have gone on since: they are read again last. */
-  const again = old.filter(s => s.mutual && !conv[s.id] && Date.now() - Date.parse(s.found || 0) < 6 * 3600e3).slice(0, 40).map(s => ({ id: s.id }));
   const seen = new Set();
   const found = [];
   const keep = pair => {
     const ak = squash(pair.a.text).slice(0, 50), bk = squash(pair.b.text).slice(0, 50);
-    if (have.has(pair.id) || texts.has(ak) || texts.has(bk)) return false;
+    if (have.has(pair.id) || texts.has(ak) || texts.has(bk)) { why('already in the file'); return false; }
     const who = [pair.a.handle, pair.b.handle].map(h => String(h).toLowerCase());
-    if (who.some(h => skipped(h) || (perPerson.get(h) || 0) >= 4 || (perRun.get(h) || 0) >= 2)) return false;
+    if (who.some(h => skipped(h) || (perPerson.get(h) || 0) >= 4 || (perRun.get(h) || 0) >= 2)) { why('that person has enough stories'); return false; }
     who.forEach(h => { perPerson.set(h, (perPerson.get(h) || 0) + 1); perRun.set(h, (perRun.get(h) || 0) + 1); });
     have.add(pair.id);
     texts.add(ak);
@@ -365,7 +378,6 @@ async function build(lang) {
   let pi = 0;
   let ci = 0;
   let qi = 0;
-  let ai = 0;
   let readThisRun = 0;
   while (!off && Date.now() < deadline && found.length < CONF.enough) {
     let did = 0;
@@ -399,7 +411,7 @@ async function build(lang) {
       await sleep(CONF.pause);
     }
     /* B. Timelines. */
-    for (let k = 0; k < 5 && pi < people.length && open('timeline'); k++) {
+    for (let k = 0; k < 5 && pi < people.length && count.timelines < CONF.timelines && open('timeline'); k++) {
       const handle = people[pi];
       let list;
       try { list = await timeline(handle); }
@@ -407,6 +419,7 @@ async function build(lang) {
       pi++;
       did++;
       count.timelines++;
+      readAt[handle.toLowerCase()] = stamp();
       noteYouth(list);
       if (!skipped(handle)) list.forEach(st => {
         const id = statusId(st);
@@ -420,13 +433,13 @@ async function build(lang) {
       });
       await sleep(1200);
     }
-    /* C. The exchanges waiting to be read: the best replies and the most answered posts in turn, then
-       the file's newest exchanges. Two pairs at most from one exchange. */
+    /* C. The exchanges waiting to be read: the best replies and the most answered posts in turn. Two
+       pairs at most from one exchange. (Reading the file's own exchanges again gave the same pairs.) */
     cands.sort((x, y) => (x.done ? 1 : 0) - (y.done ? 1 : 0) || y.score - x.score);
     posts.sort((x, y) => (x.done ? 1 : 0) - (y.done ? 1 : 0) || y.replies - x.replies);
     const next = () => {
       const c = cands.find(x => !x.done), p = posts.find(x => !x.done);
-      const pick = (qi++ % 2 === 0 ? (c || p) : (p || c)) || (ai < again.length ? again[ai++] : null);
+      const pick = qi++ % 2 === 0 ? (c || p) : (p || c);
       if (pick) pick.done = true;
       return pick;
     };
@@ -455,13 +468,14 @@ async function build(lang) {
         count.conversations++;
         via.conversation++;
         conv[batch[n].id] = stamp();
+        list.forEach(st => { if (followers(st) <= 20000) meet(handleOf(st)); });
         let pairs = 0;
         pairsIn(list, lang).forEach(pair => { if (pairs < 2 && keep(pair)) pairs++; });
       });
       await sleep(1500);
     }
-    const waiting = cands.some(x => !x.done) || posts.some(x => !x.done) || ai < again.length;
-    const more = si < searches.length || pi < people.length || waiting;
+    const waiting = cands.some(x => !x.done) || posts.some(x => !x.done);
+    const more = si < searches.length || (pi < people.length && count.timelines < CONF.timelines) || waiting;
     if (!more) break;
     console.log(`  ${lang} round: ${count.searches} searches, ${count.timelines} timelines, ${count.conversations} exchanges read, ${found.length} new stories`);
     /* Nothing could be asked this round: wait for the way in that opens first. */
@@ -470,6 +484,7 @@ async function build(lang) {
   if (found.length >= CONF.enough) console.log(`  ${lang}: ${found.length} new stories, which is enough for one run`);
   count.stories = found.length;
   count.refused = refusedTimes;
+  console.log('  pairs not kept: ' + JSON.stringify(WHY));
 
   /* The file: this run's stories and the earlier ones that are still young and still may play. */
   const fresh = s => Date.now() - Date.parse(s.found || 0) < CONF.hours * 3600e3;
@@ -480,7 +495,7 @@ async function build(lang) {
   const kinds = {};
   stories.forEach(s => { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
   console.log(`  ${lang}: ${count.searches} searches gave ${count.replies} replies, ${count.candidates} of them may play; ${count.timelines} timelines gave ${count.posts} answered posts; ${count.conversations} exchanges read whole (${count.otherWay} posts another way); ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)}.`);
-  return { version: 2, lang, updated: stamp(), run: off ? (before.run || null) : { at: stamp(), ...count }, kinds, conv, skip: Object.fromEntries(SKIP), stories };
+  return { version: 2, lang, updated: stamp(), run: off ? (before.run || null) : { at: stamp(), ...count }, kinds, conv, people: readAt, skip: Object.fromEntries(SKIP), stories };
 }
 
 async function main() {

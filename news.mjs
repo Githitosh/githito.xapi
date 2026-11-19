@@ -391,7 +391,7 @@ async function build(lang) {
       posts.push({ id, a, text, headline, replies: Number(st.replies) || 0, at: whenOf(st) });
       if (haveHead.has(id) || !headOk(text, headline)) return;
       haveHead.add(id);
-      newHeads.push({ id, h: a[0], n: a[1], t: headline, g: headGenre(a, text, lang), at: whenOf(st), found: stamp() });
+      newHeads.push({ id, h: a[0], n: a[1], t: headline, g: headGenre(a, text, lang), at: whenOf(st), rc: Number(st.replies) || 0, found: stamp() });
       got++;
     });
     console.log(`  ${lang} headlines @${handle}: ${list.length} posts, ${got} new`);
@@ -414,10 +414,11 @@ async function build(lang) {
     const was = conv[p.id];
     return !was || p.replies >= (was.rc || 0) + 10;
   }).sort((x, y) => y.replies - x.replies);
-  /* The headlines kept from earlier runs have not been asked how many replies they have: newest first.
-     With these a run finds replies even when every search is refused. */
-  const kept = oldHeads.filter(x => !seenPost.has(x.id) && !conv[x.id] && newsOk(x.t, x.t)).map(x => ({ id: x.id, a: anyHandle.get(String(x.h).toLowerCase()), text: x.t, headline: x.t, replies: -1, at: x.at || '' }))
-    .filter(p => p.a).sort((x, y) => (Date.parse(y.at) || 0) - (Date.parse(x.at) || 0));
+  /* The headlines kept from earlier runs that were not seen again in this one: those that had replies
+     when last seen. With these a run finds replies even when the accounts cannot be read. */
+  const kept = oldHeads.filter(x => !seenPost.has(x.id) && !conv[x.id] && (Number(x.rc) || 0) >= 2 && newsOk(x.t, x.t))
+    .map(x => ({ id: x.id, a: anyHandle.get(String(x.h).toLowerCase()), text: x.t, headline: x.t, replies: Number(x.rc) || 0, at: x.at || '' }))
+    .filter(p => p.a).sort((x, y) => y.replies - x.replies);
   const targets = freshPosts.concat(kept).slice(0, CONF.conversations);
   let convRefusals = 0;
   let convRests = 0;
@@ -565,7 +566,8 @@ async function build(lang) {
   /* The headlines: this run's and the earlier ones that are still young, newest first, no line twice. */
   const headFresh = x => Date.now() - Date.parse(x.found || 0) < CONF.headHours * 3600e3;
   const headSeen = new Set();
-  const heads = newHeads.concat(oldHeads.filter(x => headFresh(x) && headOk(x.t, x.t)).map(x => ({ ...x, g: headGenre(anyHandle.get(String(x.h).toLowerCase()), x.t, lang) })))
+  const rcNow = new Map(posts.map(p => [p.id, p.replies]));
+  const heads = newHeads.concat(oldHeads.filter(x => headFresh(x) && headOk(x.t, x.t)).map(x => ({ ...x, g: headGenre(anyHandle.get(String(x.h).toLowerCase()), x.t, lang), rc: rcNow.has(x.id) ? rcNow.get(x.id) : (Number(x.rc) || 0) })))
     .sort((x, y) => (Date.parse(y.at || y.found || 0) || 0) - (Date.parse(x.at || x.found || 0) || 0))
     .filter(x => { const k = squash(x.t).slice(0, 24); if (headSeen.has(k)) return false; headSeen.add(k); return true; })
     .slice(0, CONF.headKeep);

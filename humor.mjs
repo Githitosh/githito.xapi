@@ -217,12 +217,13 @@ async function build(lang) {
   const cands = [];
   const seen = new Set();
   let refusals = 0;
+  let rests = 0; // refusals that come and go must not make a run last for hours: six rests at most
   for (const p of CONF.noSearch ? [] : shuffle(plan)) {
     let list;
     try { list = await search(p.q, lang, p.start); count.searches++; refusals = 0; }
     catch (e) {
       if (!(e instanceof Refused)) throw e;
-      if (++refusals >= CONF.patience) { console.log(`  search ${e.message}: stopping with what was found`); break; }
+      if (++refusals >= CONF.patience || ++rests > 6) { console.log(`  search ${e.message}: stopping with what was found`); break; }
       console.log(`  search ${e.message}: resting`);
       await sleep(CONF.rest);
       continue;

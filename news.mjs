@@ -61,6 +61,7 @@ const CONF = {
   pause: num('pause', 4000),      // milliseconds between two searches
   rest: num('rest', 90000),       // milliseconds to rest when a search is refused
   patience: num('patience', 4),   // refusals in a row before a run stops searching
+  maxRests: num('maxRests', 6),   // rests one way in may take in a run: refusals that come and go must not make a run last for hours
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1',
 };
@@ -365,6 +366,7 @@ async function build(lang) {
   const newHeads = [];
   const posts = [];   // the news posts seen in this run: where replies are read from
   let headRefusals = 0;
+  let headRests = 0;
   /* The main papers every run, then the other accounts by turns. */
   const mainHeads = HEADS[lang] || [];
   const otherHeads = shuffle(accounts.map(a => a[0]).filter(h => !mainHeads.includes(h) && !(tally[h] && tally[h].tries >= 3 && !tally[h].replies)));
@@ -375,7 +377,7 @@ async function build(lang) {
     try { list = await ownPosts(handle, lang); count.headSearches++; headRefusals = 0; }
     catch (e) {
       if (!(e instanceof Refused)) throw e;
-      if (++headRefusals >= CONF.patience) { console.log(`  headlines ${e.message}: stopping with what was found`); break; }
+      if (++headRefusals >= CONF.patience || ++headRests > CONF.maxRests) { console.log(`  headlines ${e.message}: stopping with what was found`); break; }
       console.log(`  headlines ${e.message}: resting`);
       await sleep(CONF.rest);
       continue;
@@ -418,11 +420,12 @@ async function build(lang) {
     .filter(p => p.a).sort((x, y) => (Date.parse(y.at) || 0) - (Date.parse(x.at) || 0));
   const targets = freshPosts.concat(kept).slice(0, CONF.conversations);
   let convRefusals = 0;
+  let convRests = 0;
   for (let i = 0; i < targets.length && !CONF.noSearch; i += 3) {
     const batch = targets.slice(i, i + 3);
     const got = await Promise.all(batch.map(p => conversation(p.id).catch(e => { if (e instanceof Refused) return null; throw e; })));
     if (got.every(g => !g)) {
-      if (++convRefusals >= CONF.patience) { console.log('  conversations refused: stopping with what was found'); break; }
+      if (++convRefusals >= CONF.patience || ++convRests > CONF.maxRests) { console.log('  conversations refused: stopping with what was found'); break; }
       console.log('  conversations refused: resting');
       await sleep(CONF.rest);
       i -= 3;
@@ -470,13 +473,14 @@ async function build(lang) {
     for (let i = 0; i < n; i++) plan.push({ a, start: now - CONF.window * 3600 - Math.floor(Math.random() * Math.max(1, CONF.back - CONF.window)) * 3600 });
   });
   let refusals = 0;
+  let rests = 0;
   for (const p of CONF.noSearch ? [] : shuffle(plan).slice(0, CONF.searches)) {
     const handle = p.a[0];
     let list;
     try { list = await search(handle, lang, p.start); count.searches++; refusals = 0; }
     catch (e) {
       if (!(e instanceof Refused)) throw e;
-      if (++refusals >= CONF.patience) { console.log(`  search ${e.message}: stopping with what was found`); break; }
+      if (++refusals >= CONF.patience || ++rests > CONF.maxRests) { console.log(`  search ${e.message}: stopping with what was found`); break; }
       console.log(`  search ${e.message}: resting`);
       await sleep(CONF.rest);
       continue;

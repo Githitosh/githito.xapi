@@ -60,6 +60,7 @@ const CONF = {
   perNews: num('perNews', 8),     // replies kept for one piece of news
   headSearches: num('headSearches', 50), // searches for the news accounts' own posts (the headlines)
   headKeep: num('headKeep', 900), // headlines the file holds
+  translate: num('translate', 400), // headlines put into English in one run (the News page shows both)
   headHours: num('headHours', 72), // a headline leaves the file after this many hours
   minutes: num('minutes', 10),    // how long one run may ask: it runs every half hour
   hours: num('hours', 72),        // a reply leaves the file after this many hours
@@ -293,6 +294,42 @@ function headOk(text, headline) {
    - news: headlines only.
    - genre: for each genre, its replies with its headlines among them, or its headlines alone. */
 const NO_REPLY = new Set(['politics', 'safety']);
+/* What the post says after its headline: one more short line for the card, or ''. */
+export function detailOf(raw, headline) {
+  const t = String(raw || '').replace(/https?:\/\/\S+/g, ' ').replace(/[#＃][^\s#＃]+/g, ' ').replace(/[ \t　]+/g, ' ');
+  const head = squash(headline).replace(/…$/, '').slice(0, 20);
+  const lines = t.split(/\n+|(?<=[。！？])/).map(x => x.trim()).filter(Boolean);
+  const at = lines.findIndex(l => squash(l).includes(head.slice(0, 12)) || head.includes(squash(l).slice(0, 12)));
+  for (const l of lines.slice(at + 1)) {
+    const line = l.replace(/[。\s]+$/, '');
+    const n = charLen(line);
+    if (n < 8 || n > 44 || (line.match(/[぀-ヿ一-鿿]/g) || []).length < 4) continue;
+    if (/詳しく|こちら|記事|続き|全文|▼|↓|▶|→|動画|写真|ライブ|配信|無料|会員|登録|フォロー|#/.test(line) || squash(line).slice(0, 10) === head.slice(0, 10)) continue;
+    return line;
+  }
+  return '';
+}
+/* Headlines put into English (Google's translation, asked without a key as a browser's page does):
+   several at a time, joined by a mark that comes back unchanged. A refusal ends the work for this run;
+   what is left is done in the next. */
+async function intoEnglish(texts) {
+  const out = texts.map(() => '');
+  const mark = '\n###\n';
+  for (let i = 0; i < texts.length; i += 6) {
+    const slice = texts.slice(i, i + 6);
+    try {
+      const res = await fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=ja&tl=en&dt=t&q=' + encodeURIComponent(slice.join(mark)), { headers: { 'user-agent': 'githito.xapi collector' }, signal: AbortSignal.timeout(20000) });
+      if (!res.ok) { console.log(`  translation refused (${res.status}) after ${i} headlines`); break; }
+      const data = await res.json();
+      const parts = ((data && data[0]) || []).map(row => (row && row[0]) || '').join('').split(/\s*###\s*/);
+      if (parts.length !== slice.length) { translatedOdd++; continue; }
+      slice.forEach((src, k) => { const e = String(parts[k] || '').replace(/\s+/g, ' ').trim(); if (e && /[A-Za-z]{3}/.test(e) && !/[぀-ヿ]/.test(e)) out[i + k] = e; });
+    } catch (e) { console.log('  translation did not answer: ' + (e.message || e)); break; }
+    await sleep(700);
+  }
+  return out;
+}
+let translatedOdd = 0;
 function newsPlay(items, news, heads) {
   const tag = (list, t) => list.map(x => t + x.id);
   const replies = spread(lean(items, x => (news[x.n] && news[x.n].at) || x.at, 24), x => ['n' + x.n, 'p' + String(x.h).toLowerCase()], 20);
@@ -457,7 +494,8 @@ async function build(lang) {
       posts.push({ id, a, text, headline, replies: Number(st.replies) || 0, at: whenOf(st) });
       if (haveHead.has(id) || !headOk(text, headline)) return;
       haveHead.add(id);
-      newHeads.push({ id, h: a[0], n: a[1], t: headline, g: headGenre(a, text, lang), at: whenOf(st), rc: Number(st.replies) || 0, found: stamp(), ...(own ? { q: 1 } : {}) });
+      const detail = detailOf(text, headline);
+      newHeads.push({ id, h: a[0], n: a[1], t: headline, ...(detail ? { d: detail } : {}), g: headGenre(a, text, lang), at: whenOf(st), rc: Number(st.replies) || 0, found: stamp(), ...(own ? { q: 1 } : {}) });
       got++;
     });
     console.log(`  ${lang} headlines @${handle}: ${list.length} posts, ${got} new`);
@@ -641,6 +679,14 @@ async function build(lang) {
     .sort((x, y) => (Date.parse(y.at || y.found || 0) || 0) - (Date.parse(x.at || x.found || 0) || 0))
     .filter(x => { const k = squash(x.t).slice(0, 24); if (headSeen.has(k)) return false; headSeen.add(k); return true; })
     .slice(0, CONF.headKeep);
+  /* The headlines in English too, for the card (the newest first; those done in earlier runs keep theirs). */
+  if (!flag('no-translate')) {
+    const todo = heads.filter(x => !x.e).slice(0, CONF.translate);
+    const en = todo.length ? await intoEnglish(todo.map(x => x.t.replace(/【[^】]*】/g, ' ').trim() || x.t)) : [];
+    todo.forEach((x, i) => { if (en[i]) x.e = en[i]; });
+    count.translated = en.filter(Boolean).length;
+    console.log(`  headlines in English: ${heads.filter(x => x.e).length} of ${heads.length} (${count.translated} in this run${translatedOdd ? ', ' + translatedOdd + ' answers could not be split' : ''})`);
+  }
   const headGenres = {};
   heads.forEach(x => { headGenres[x.g || 'other'] = (headGenres[x.g || 'other'] || 0) + 1; });
   console.log(`  headlines: ${count.headSearches} searches gave ${count.heads} new; the file holds ${heads.length} ${JSON.stringify(headGenres)}`);

@@ -17,6 +17,10 @@ on:
         description: 'Run one part only: news or humor (empty: everything)'
         type: string
         default: ''
+      searches:
+        description: 'News: how many reply searches this run makes (empty: as in config.json)'
+        type: string
+        default: ''
 permissions:
   contents: write
 concurrency:
@@ -53,7 +57,7 @@ jobs:
         continue-on-error: true
         env:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
-        run: node news.mjs --out public
+        run: node news.mjs --out public ${{ inputs.searches && format('--searches {0}', inputs.searches) || '' }}
       - name: Publish (branch api, one commit, no history kept)
         run: |
           cd public

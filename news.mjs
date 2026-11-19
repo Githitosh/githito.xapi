@@ -14,12 +14,15 @@
    How:
      1. Searches of replies written to news accounts ("to:nhk_news"), each over a few hours of the
         last day and a half. A search gives about 20 replies.
-     2. A reply may play when it is short, says something, and attacks nobody: no insults, no blame,
-        nothing violent, sexual or heavy, no advertising.
+     2. A reply may play when it is an earnest one: a thought about the news in plain words, of 12 to
+        80 characters, attacking nobody. No laughter, no cheering, no insults, no blame, nothing
+        violent, sexual or heavy, no advertising.
      3. The post each reply answers is read once (many replies answer the same post). It must be the
         news account's own post, and the news must not be about a death, a crime, an accident, a
         disaster or a war: jokes under such news are not for a video.
      4. The file keeps up to 2000 replies for 72 hours, at most a few for one piece of news.
+     5. The news accounts' own latest posts are kept too, as headlines (up to 900 for 36 hours). The
+        page plays them when replies are switched off, and for news that gets no replies.
    Settings are in config.json under "news"; "on": false turns it off. Node 20 or newer; no packages. */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -41,6 +44,9 @@ const CONF = {
   parents: num('parents', 500),   // news posts read in one run
   keep: num('keep', 2000),        // replies the file holds
   perNews: num('perNews', 8),     // replies kept for one piece of news
+  headSearches: num('headSearches', 30), // searches for the news accounts' own posts (the headlines)
+  headKeep: num('headKeep', 900), // headlines the file holds
+  headHours: num('headHours', 36), // a headline leaves the file after this many hours
   hours: num('hours', 72),        // a reply leaves the file after this many hours
   window: num('window', 4),       // hours one search covers
   back: num('back', 36),          // how many hours back the searches reach
@@ -62,8 +68,8 @@ const ACCOUNTS = {
   ja: [
     ['livedoornews', 'ライブドアニュース', '', 6],
     ['YahooNewsTopics', 'Yahoo!ニュース', '', 5],
-    ['oricon', 'オリコンニュース', 'entertainment', 6],
-    ['modelpress', 'モデルプレス', 'entertainment', 6],
+    ['oricon', 'オリコンニュース', 'entertainment', 4],
+    ['modelpress', 'モデルプレス', 'entertainment', 3],
     ['natalie_mu', '音楽ナタリー', 'entertainment', 3],
     ['eiga_natalie', '映画ナタリー', 'entertainment', 2],
     ['owarai_natalie', 'お笑いナタリー', 'entertainment', 2],
@@ -89,7 +95,7 @@ const ACCOUNTS = {
     ['gekisaka', 'ゲキサカ', 'sports', 1],
     ['sportsnavi', 'スポーツナビ', 'sports', 2],
     ['theanswerc2', 'THE ANSWER', 'sports', 1],
-    ['numberweb', 'Number', 'sports', 1],
+    ['numberweb', 'Number', 'sports', 2],
     ['itm_nlab', 'ねとらぼ', 'culture', 4],
     ['grapeejp', 'grape', 'culture', 2],
     ['maidonanews', 'まいどなニュース', 'culture', 2],
@@ -99,35 +105,35 @@ const ACCOUNTS = {
     ['HuffPostJapan', 'ハフポスト', '', 1],
     ['KAI_YOU_ed', 'KAI-YOU', 'culture', 1],
     ['dailyportalz', 'デイリーポータルZ', 'culture', 1],
-    ['karapaia', 'カラパイア', 'science', 1],
-    ['fashionpressnet', 'ファッションプレス', 'culture', 3],
+    ['karapaia', 'カラパイア', 'science', 2],
+    ['fashionpressnet', 'ファッションプレス', 'culture', 2],
     ['rocketnews24', 'ロケットニュース24', 'food', 3],
     ['macaroni_news', 'macaroni', 'food', 1],
     ['gnavi', 'ぐるなび', 'restaurant', 1],
     ['walkerplus_news', 'ウォーカープラス', 'local', 1],
-    ['itmedia_news', 'ITmedia NEWS', 'science', 3],
-    ['gigazine', 'GIGAZINE', 'science', 2],
+    ['itmedia_news', 'ITmedia NEWS', 'science', 5],
+    ['gigazine', 'GIGAZINE', 'science', 3],
     ['wired_jp', 'WIRED', 'science', 1],
-    ['NazologyInfo', 'ナゾロジー', 'science', 1],
+    ['NazologyInfo', 'ナゾロジー', 'science', 2],
     ['NatGeoMagJP', 'ナショナル ジオグラフィック', 'science', 1],
     ['sorae_jp', 'sorae', 'space', 2],
     ['AstroArts', 'アストロアーツ', 'space', 1],
     ['JAXA_jp', 'JAXA', 'space', 1],
     ['wni_jp', 'ウェザーニュース', 'local', 3],
     ['tenkijp', 'tenki.jp', 'local', 2],
-    ['nhk_news', 'NHKニュース', '', 3],
-    ['tbsnewsdig', 'TBS NEWS DIG', '', 2],
-    ['news24ntv', '日テレNEWS', '', 2],
-    ['FNN_News', 'FNNプライムオンライン', '', 2],
-    ['tv_asahi_news', 'テレ朝news', '', 2],
-    ['asahi', '朝日新聞', '', 1],
-    ['mainichi', '毎日新聞', '', 1],
-    ['Yomiuri_Online', '読売新聞', '', 2],
-    ['nikkei', '日本経済新聞', '', 2],
-    ['Sankei_news', '産経ニュース', '', 1],
-    ['kyodo_official', '共同通信', '', 1],
-    ['jijicom', '時事通信', '', 1],
-    ['47news_official', '47NEWS', '', 1],
+    ['nhk_news', 'NHKニュース', '', 5],
+    ['tbsnewsdig', 'TBS NEWS DIG', '', 3],
+    ['news24ntv', '日テレNEWS', '', 3],
+    ['FNN_News', 'FNNプライムオンライン', '', 3],
+    ['tv_asahi_news', 'テレ朝news', '', 3],
+    ['asahi', '朝日新聞', '', 2],
+    ['mainichi', '毎日新聞', '', 2],
+    ['Yomiuri_Online', '読売新聞', '', 3],
+    ['nikkei', '日本経済新聞', '', 5],
+    ['Sankei_news', '産経ニュース', '', 2],
+    ['kyodo_official', '共同通信', '', 2],
+    ['jijicom', '時事通信', '', 2],
+    ['47news_official', '47NEWS', '', 2],
     ['entabejp', 'えん食べ', 'food', 1],
   ],
 };
@@ -139,7 +145,7 @@ const NASTY = /辞めろ|やめろ|辞任|辞職|罷免|解散しろ|責任(?:�
 /* Groups of people named in anger are left out whatever the rest says. */
 const GROUPS = /中国人|韓国人|朝鮮人|外国人|移民|難民|在日|日本人じゃ|女さん|まんさん|男さん|フェミ|老人|高齢者は|若者は|ゆとり|氷河期|生活保護|ナマポ|宗教|信者|創価|統一教会|共産|自民|立憲|維新|公明|れいわ|参政|国民民主|保守党|与党|野党|総理|首相|大臣|議員|知事|市長|政権|政府|官僚|財務省|天皇|皇室/;
 /* Unkind about somebody: tired of them, telling them off, judging how they look or what they can do. */
-const UNKIND = /飽き|卒業し[てろ]|使う[所とこ]|マシ|しょ[ーう]もな|つまら[なん]|いらん|ダメ|だめ|駄目|下手|ヘタ|微妙|キツ[いイ]|きつい|痛々|誰[？?]|誰やねん|誰だよ|知らん|興味[なね]|どうでも|劣化|老け|太っ[たて]|痩せ[ろた]|整形|顔バレ|ないのか|舐め|なめられ|おかしい|キチンと|ちゃんと(?:しろ|して|やれ|せ)|しろ[！!。]|しろよ|やれよ|すべき|べき[だで]|ありえ|あり得|イヤ|いやだ|嫌だ|無理|ムリ|頭[がの](?:悪|おか|弱)|レベル[がの]低|程度[がの]低|民度|境界知能|知能|底辺|貧乏|貧困|乞食|キモ|きも|ウザ|うざ|消え[ろて]|黙[れっ]|うるせ|うるさ|調子に乗|勘違い|自慢|あざと|媚び|ステマ|ゴリ押し|ごり押し|枕|コネ|七光り|干され|落ち目|オワ|需要[がな]|誰得|不細工|ブサ|デブ|ハゲ|ババ|ジジ|おばさん|おじさん|年増|若作り|痛い[人奴女男]|やらかし|前科|黒歴史|嘘くさ|胡散臭|うさんくさ|怪し|あやし|信者|アンチ|叩き|晒|通報|ブロック|訴|こいつ|コイツ|あいつ|アイツ|そいつ|この人|あの人|この女|この男|奴[はがらに]|やつ[はがら]|起こすな|すんな|するな[よ。！!]?$|印象操作|騒動|スキャンダル|不倫|熱愛|文春|暴露|拒否反応|問題児|お騒がせ|お荷物|どうすんの|持てよ|しろよ|顕示欲|承認欲求|意味[あな]|^で[？?]|場合ちゃう|場合じゃ|余計な|ビミョ|ダサ|だせ[ぇえー]|センス[なね]|がっかり|期待外れ|期待はずれ|時代遅れ|古い|安っぽ|パクリ|ぱくり|二番煎じ|炎上商法|話題作り|売名/;
+const UNKIND = /飽き|卒業し[てろ]|使う[所とこ]|マシ|しょ[ーう]もな|つまら[なん]|いらん|ダメ|だめ|駄目|下手|ヘタ|微妙|キツ[いイ]|きつい|痛々|誰[？?]|誰やねん|誰だよ|知らん|興味[なね]|どうでも|劣化|老け|太っ[たて]|痩せ[ろた]|整形|顔バレ|ないのか|舐め|なめられ|おかしい|キチンと|ちゃんと(?:しろ|して|やれ|せ)|しろ[！!。]|しろよ|やれよ|すべき|べき[だで]|ありえ|あり得|イヤ|いやだ|嫌だ|無理|ムリ|頭[がの](?:悪|おか|弱)|レベル[がの]低|程度[がの]低|民度|境界知能|知能|底辺|貧乏|貧困|乞食|キモ|きも|ウザ|うざ|消え[ろて]|黙[れっ]|うるせ|うるさ|調子に乗|勘違い|自慢|あざと|媚び|ステマ|ゴリ押し|ごり押し|枕|コネ|七光り|干され|落ち目|オワ|需要[がな]|誰得|不細工|ブサ|デブ|ハゲ|ババ|ジジ|おばさん|おじさん|年増|若作り|痛い[人奴女男]|やらかし|前科|黒歴史|嘘くさ|胡散臭|うさんくさ|怪し|あやし|信者|アンチ|叩き|晒|通報|ブロック|訴|こいつ|コイツ|あいつ|アイツ|そいつ|この人|あの人|この女|この男|奴[はがらに]|やつ[はがら]|起こすな|すんな|するな[よ。！!]?$|印象操作|騒動|スキャンダル|不倫|熱愛|文春|暴露|拒否反応|問題児|お騒がせ|お荷物|どうすんの|持てよ|しろよ|顕示欲|承認欲求|意味[あな]|^で[？?]|場合ちゃう|場合じゃ|余計な|ビミョ|ダサ|だせ[ぇえー]|センス[なね]|がっかり|期待外れ|期待はずれ|時代遅れ|古い|安っぽ|パクリ|ぱくり|二番煎じ|炎上商法|話題作り|売名|悪魔|何考えて|何を考えて|出来レース|やらせ|ヤラセ|票操作|忖度/;
 const SPAM = /フォロー|拡散|リポスト|\bRT\b|プロフ|固ツイ|\bDM\b|ＤＭ|LINE|副業|稼[げぎ]|儲[けか]|投資|仮想通貨|ビットコイン|\bNFT\b|当選|プレゼント|キャンペーン|応募|無料|クーポン|ポイ活|案件|宣伝|予約|販売|通販|出会い|裏垢|配信中|見に来て|チャンネル登録|@grok|grok/i;
 /* Nothing that says how old somebody is, and no one whose profile says they are under age. */
 const MINOR_BIO = /(?:^|[^0-9])1[0-7]\s*(?:歳|才|y\/?o\b|years? old)|高[1-3１-３一二三](?:$|[^0-9０-９])|中[1-3１-３一二三](?:$|[^0-9０-９])|高校|中学|小学|学生|ＪＫ|ＪＣ|[LSF]?JK|\bJC\b|\bDK\b|\bminor\b|\bunder ?18\b|\bteen\b/i;
@@ -164,9 +170,23 @@ function parentOf(st) {
   return { id: /^\d+$/.test(String(id)) ? String(id) : '', who: String(who).replace(/^@+/, '') };
 }
 /* The words of a reply, when it may play; '' when it may not. */
+/* The News page plays earnest replies: a thought about the news in plain words. Laughter, cheering
+   and reactions made of emoji belong on the Humor page. */
+const LAUGH = /笑|(?<![A-Za-z])[wｗ]+(?![A-Za-z])|草|ワロ|ウケ|うける|ネタ|ボケ|大喜利|ｗ|😂|🤣|😆|😁|😜|🤪|😝|😹/u;
+const CHEER = /かっこい|カッコい|かわい|可愛|尊い|イケメン|ビジュ|大好き|だいすき|推し|最高|神[！!]|おめでと|ありがと|楽しみ|たのしみ|待って[るま]|嬉し|うれし|会いたい|頑張[っれ]|がんば|応援|ファイト|きゃー|やったー|わーい|すごい[！!]|素敵|すてき|癒|泣け|泣い|涙/;
+const THOUGHT = /と思|思う|思い|思え|考え|感じ|気がする|気になる|だろう|でしょう|かもしれ|はず|必要|大事|大切|重要|期待|心配|不安|課題|影響|今後|将来|これから|対策|改善|理由|原因|背景|結果|なるほど|勉強に|参考に|確かに|たしかに|難しい|興味深|納得|同感|賛成|便利|助かる|ありがたい|安心|進歩|進化|変化|時代|需要|価格|値段|コスト|技術|仕組み|制度|ルール|選択肢|可能性|メリット|デメリット|バランス|注目|意外|さすが|実力|実績|経験|成長|判断|決断|戦略|方針|狙い|効果|品質|安全|環境|市場|業界|業績|競争|普及|活用|導入|開発|研究/;
+const POLITE = /です|ます|でしょう|ません|でした|ました/;
+const emojiCount = t => (String(t).match(/\p{Extended_Pictographic}/gu) || []).length;
+/* Whether a reply is an earnest one. */
+function earnest(text) {
+  const n = charLen(text);
+  if (n < 12 || n > 80) return false;
+  if (LAUGH.test(text) || CHEER.test(text) || emojiCount(text) > 1 || /[！!]{2,}|[？?]{2,}|〜{2,}|ー{3,}|かと思った|かと思いき|と思ったら|お願いします|。。。|…。/.test(text)) return false;
+  return THOUGHT.test(text) || (POLITE.test(text) && n >= 18);
+}
 function replyOk(text) {
   const n = charLen(text);
-  if (!text || n < 5 || n > 42) return false;
+  if (!text || n < 12 || n > 80 || !earnest(text)) return false;
   if ((text.match(/[぀-ヿ]/g) || []).length < 2) return false;
   if (/@\w/.test(text) || /[ｦ-ﾟ]{3,}/.test(text) || /(.)\1{5,}/u.test(text)) return false;
   return cleanText(text) && !NASTY.test(text) && !UNKIND.test(text) && !GROUPS.test(text) && !SPAM.test(text) && !EMPTY.test(text) && !GRAVE.test(text) && !STATE.test(text);
@@ -179,14 +199,14 @@ function replyText(st) {
   if (MINOR_BIO.test(bio) || BOT_BIO.test(bio) || a.protected || st.possibly_sensitive) return '';
   return text;
 }
-/* How much a reply says: short, lively ones first. */
+/* How much a reply says: a thought, said politely, of a length that can be read on a card. */
 function replyScore(text, st) {
   const n = charLen(text);
   let s = 0;
-  if (n >= 8 && n <= 36) s += 4; else if (n > 48) s -= 2;
-  if (/笑|[wｗ]{1,3}$|草|😂|🤣|😆|😅|[！!？?]{2,}|〜|～/u.test(text)) s += 2;
-  if (/[？?]/.test(text)) s += 1;
-  if (/かわいい|可愛い|すごい|凄い|最高|うれしい|嬉しい|楽しみ|食べたい|行きたい|欲しい|ほしい|好き|おめでと|ありがと|がんばれ|頑張れ|応援/.test(text)) s += 2;
+  if (n >= 18 && n <= 60) s += 3;
+  s += Math.min(6, (text.match(new RegExp(THOUGHT.source, 'g')) || []).length * 2);
+  if (POLITE.test(text)) s += 2;
+  if (emojiCount(text)) s -= 1;
   const likes = Number(st && (st.likes ?? st.favorite_count)) || 0;
   s += Math.min(6, Math.log2(likes + 1) * 1.5);
   return Math.round((s + Math.random() * 2) * 10) / 10;
@@ -224,6 +244,29 @@ function genreFor(account, text, lang) {
 /* A reply that only says the news again says nothing. */
 const echoes = (reply, news) => { const r = squash(reply), n = squash(news); return r.length >= 8 && (n.includes(r.slice(0, 10)) || r.includes(n.slice(0, 12))); };
 
+/* ---------- the headlines ---------- */
+/* The accounts whose own posts are kept as headlines: the page plays them when replies are switched
+   off, and for news that gets no replies (politics, public safety). */
+const HEAD_ONLY = { ja: [['ReutersJapan', 'ロイター', '', 0], ['bbcnewsjapan', 'BBCニュース', '', 0]] };
+const HEADS = {
+  ja: ['nhk_news', 'YahooNewsTopics', 'livedoornews', '47news_official', 'kyodo_official', 'jijicom', 'asahi', 'mainichi', 'Yomiuri_Online', 'nikkei',
+    'Sankei_news', 'tbsnewsdig', 'news24ntv', 'FNN_News', 'tv_asahi_news', 'ReutersJapan', 'bbcnewsjapan', 'oricon', 'modelpress', 'nikkansports',
+    'SportsHochi', 'sponichiannex', 'Fullcountc2', 'itmedia_news', 'gigazine', 'itm_nlab', 'wni_jp', 'natalie_mu', 'cinematoday', 'famitsu'],
+};
+/* Never as a headline in a video, whatever the page's own switches say. */
+const NOT_A_HEADLINE = /わいせつ|性的|性被害|性加害|性暴力|不同意|レイプ|強姦|児童ポルノ|盗撮|痴漢|自殺|自死|心中|虐待|遺体|殺害|殺人|刺殺|死傷/;
+const CRIME = /逮捕|容疑|送検|起訴|被告|判決|懲役|警察|警視庁|県警|府警|道警|事件|詐欺|窃盗|強盗|横領|暴行|傷害|脅迫|飲酒運転|ひき逃げ|事故|火災|火事|消防|救急|行方不明|遭難|防犯|防災|避難|警報|注意報/;
+function headGenre(account, text, lang) {
+  if (STATE.test(text)) return 'politics';
+  if (CRIME.test(text)) return 'safety';
+  return genreFor(account, text, lang);
+}
+function headOk(text, headline) {
+  if (!headline || charLen(headline) < 10 || (openBracket(headline) && !/…$/.test(headline))) return false;
+  if ((headline.match(/[぀-ヿ一-鿿]/g) || []).length < 5) return false;
+  return !NOT_A_HEADLINE.test(text) && !SPAM.test(text);
+}
+
 /* ---------- asking ---------- */
 let asked = 0;
 let readCount = 0;
@@ -242,6 +285,12 @@ async function search(handle, lang, start) {
   asked++;
   const q = `to:${handle} filter:replies -filter:links lang:${lang} since_time:${start} until_time:${start + CONF.window * 3600}`;
   const data = await fxJson('https://api.fxtwitter.com/2/search?count=100&q=' + encodeURIComponent(q));
+  return (data && data.results) || [];
+}
+/* An account's own latest posts (no replies, no reposts). */
+async function ownPosts(handle, lang) {
+  asked++;
+  const data = await fxJson('https://api.fxtwitter.com/2/search?count=100&q=' + encodeURIComponent(`from:${handle} -filter:replies -filter:retweets lang:${lang}`));
   return (data && data.results) || [];
 }
 /* A news post: its words, who wrote it, when. FxTwitter first; when it refuses, vxTwitter. */
@@ -273,7 +322,42 @@ async function build(lang) {
   const byHandle = new Map(accounts.map(a => [a[0].toLowerCase(), a]));
   const have = new Set(oldItems.map(x => x.id));
   const texts = new Set(oldItems.map(x => squash(x.t).slice(0, 40)));
-  const count = { searches: 0, replies: 0, candidates: 0, read: 0, news: 0, items: 0 };
+  const count = { searches: 0, replies: 0, candidates: 0, read: 0, news: 0, items: 0, headSearches: 0, heads: 0 };
+  const everyAccount = accounts.concat(HEAD_ONLY[lang] || []);
+  const anyHandle = new Map(everyAccount.map(a => [a[0].toLowerCase(), a]));
+
+  /* 0. The headlines: the news accounts' own latest posts. They are few searches, so they go first. */
+  const oldHeads = (Array.isArray(before.heads) ? before.heads : []).filter(x => x && x.id && x.h && x.t);
+  const haveHead = new Set(oldHeads.map(x => x.id));
+  const newHeads = [];
+  let headRefusals = 0;
+  for (const handle of CONF.noSearch ? [] : shuffle(HEADS[lang] || []).slice(0, CONF.headSearches)) {
+    const a = anyHandle.get(handle.toLowerCase());
+    if (!a) continue;
+    let list;
+    try { list = await ownPosts(handle, lang); count.headSearches++; headRefusals = 0; }
+    catch (e) {
+      if (!(e instanceof Refused)) throw e;
+      if (++headRefusals >= CONF.patience) { console.log(`  headlines ${e.message}: stopping with what was found`); break; }
+      console.log(`  headlines ${e.message}: resting`);
+      await sleep(CONF.rest);
+      continue;
+    }
+    let got = 0;
+    list.forEach(st => {
+      const id = statusId(st);
+      if (!id || haveHead.has(id) || handleOf(st).toLowerCase() !== handle.toLowerCase() || parentOf(st).id) return;
+      const text = String(st.text || '');
+      const headline = headlineOf(text);
+      if (!headOk(text, headline)) return;
+      haveHead.add(id);
+      newHeads.push({ id, h: a[0], n: a[1], t: headline, g: headGenre(a, text, lang), at: whenOf(st), found: stamp() });
+      got++;
+    });
+    console.log(`  ${lang} headlines @${handle}: ${list.length} posts, ${got} new`);
+    await sleep(CONF.pause);
+  }
+  count.heads = newHeads.length;
 
   /* 1. The searches: each account by its share, an account that never answered left out. */
   const alive = accounts.filter(a => { const t = tally[a[0]]; return !(t && t.tries >= 3 && !t.replies); });
@@ -375,7 +459,17 @@ async function build(lang) {
   console.log('  by source: ' + JSON.stringify(sources));
   const quiet = accounts.filter(a => { const t = tally[a[0]]; return t && t.tries >= 3 && !t.replies; }).map(a => a[0]);
   if (quiet.length) console.log('  accounts that gave nothing (left out): ' + quiet.join(', '));
-  return { version: 1, lang, updated: stamp(), run: CONF.noSearch ? (before.run || null) : { at: stamp(), ...count }, genres, accounts: tally, news: usedNews, items };
+  /* The headlines: this run's and the earlier ones that are still young, newest first, no line twice. */
+  const headFresh = x => Date.now() - Date.parse(x.found || 0) < CONF.headHours * 3600e3;
+  const headSeen = new Set();
+  const heads = newHeads.concat(oldHeads.filter(x => headFresh(x) && headOk(x.t, x.t)).map(x => ({ ...x, g: headGenre(anyHandle.get(String(x.h).toLowerCase()), x.t, lang) })))
+    .sort((x, y) => (Date.parse(y.at || y.found || 0) || 0) - (Date.parse(x.at || x.found || 0) || 0))
+    .filter(x => { const k = squash(x.t).slice(0, 24); if (headSeen.has(k)) return false; headSeen.add(k); return true; })
+    .slice(0, CONF.headKeep);
+  const headGenres = {};
+  heads.forEach(x => { headGenres[x.g || 'other'] = (headGenres[x.g || 'other'] || 0) + 1; });
+  console.log(`  headlines: ${count.headSearches} searches gave ${count.heads} new; the file holds ${heads.length} ${JSON.stringify(headGenres)}`);
+  return { version: 2, lang, updated: stamp(), run: CONF.noSearch ? (before.run || null) : { at: stamp(), ...count }, genres, headGenres, accounts: tally, news: usedNews, items, heads };
 }
 
 async function main() {

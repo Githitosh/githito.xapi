@@ -182,7 +182,7 @@ function earnest(text) {
   const n = charLen(text);
   if (n < 12 || n > 80) return false;
   if (LAUGH.test(text) || CHEER.test(text) || emojiCount(text) > 1 || /[！!]{2,}|[？?]{2,}|〜{2,}|ー{3,}|かと思った|かと思いき|と思ったら|お願いします|。。。|…。/.test(text)) return false;
-  return THOUGHT.test(text) || (POLITE.test(text) && n >= 18);
+  return THOUGHT.test(text) || POLITE.test(text) || n >= 20;
 }
 function replyOk(text) {
   const n = charLen(text);
@@ -219,7 +219,7 @@ export function headlineOf(raw) {
   const lines = t.split(/\n+/).map(s => s.trim()).filter(Boolean);
   let h = lines[0] || '';
   const open = openBracket;
-  for (let k = 1; k < lines.length && (charLen(h) < 12 || (open(h) && charLen(h) < 40)); k++) h += (open(h) ? '' : ' ') + lines[k];
+  for (let k = 1; k < lines.length && (charLen(h) < 18 || (open(h) && charLen(h) < 40)); k++) h += (open(h) ? '' : ' ') + lines[k];
   if (charLen(h) > 44) { const m = h.match(/^(.{12,48}?[。！？!?])/u); if (m) h = m[1]; }
   h = h.replace(/^(?:【(?:ヤフートピックス|Yahoo!ニュース|ニュース|記事)】)\s*/, '').replace(/[。、\s]+$/, '').trim().replace(/^【([^【】]+)】$/, '$1');
   const chars = [...h];
@@ -251,20 +251,21 @@ const HEAD_ONLY = { ja: [['ReutersJapan', 'ロイター', '', 0], ['bbcnewsjapan
 const HEADS = {
   ja: ['nhk_news', 'YahooNewsTopics', 'livedoornews', '47news_official', 'kyodo_official', 'jijicom', 'asahi', 'mainichi', 'Yomiuri_Online', 'nikkei',
     'Sankei_news', 'tbsnewsdig', 'news24ntv', 'FNN_News', 'tv_asahi_news', 'ReutersJapan', 'bbcnewsjapan', 'oricon', 'modelpress', 'nikkansports',
-    'SportsHochi', 'sponichiannex', 'Fullcountc2', 'itmedia_news', 'gigazine', 'itm_nlab', 'wni_jp', 'natalie_mu', 'cinematoday', 'famitsu'],
+    'SportsHochi', 'sponichiannex', 'Fullcountc2', 'itmedia_news', 'gigazine', 'wni_jp', 'natalie_mu', 'cinematoday', 'famitsu', 'mantanweb'],
 };
 /* Never as a headline in a video, whatever the page's own switches say. */
 const NOT_A_HEADLINE = /わいせつ|性的|性被害|性加害|性暴力|不同意|レイプ|強姦|児童ポルノ|盗撮|痴漢|自殺|自死|心中|虐待|遺体|殺害|殺人|刺殺|死傷/;
 const CRIME = /逮捕|容疑|送検|起訴|被告|判決|懲役|警察|警視庁|県警|府警|道警|事件|詐欺|窃盗|強盗|横領|暴行|傷害|脅迫|飲酒運転|ひき逃げ|事故|火災|火事|消防|救急|行方不明|遭難|防犯|防災|避難|警報|注意報/;
+const POLITICS = /首相|総理|大臣|官房長官|内閣|政権|与党|野党|自民|立憲|維新|公明党|共産党|国民民主|れいわ|参政党|保守党|議員|国会|衆院|参院|選挙|知事選|市長選|首脳|大統領|外相|外交|防衛費|安保|法案|閣議|政治|政府|[一-龥]{1,3}相(?:は|が|、|「|$)/;
 function headGenre(account, text, lang) {
-  if (STATE.test(text)) return 'politics';
+  if (POLITICS.test(text)) return 'politics';
   if (CRIME.test(text)) return 'safety';
   return genreFor(account, text, lang);
 }
 function headOk(text, headline) {
   if (!headline || charLen(headline) < 10 || (openBracket(headline) && !/…$/.test(headline))) return false;
   if ((headline.match(/[぀-ヿ一-鿿]/g) || []).length < 5) return false;
-  return !NOT_A_HEADLINE.test(text) && !SPAM.test(text);
+  return !NOT_A_HEADLINE.test(text) && !SPAM.test(text) && emojiCount(headline) < 2 && !/質問箱|お届けします|募集中|配信中|放送中|発売中|公開中|好評|詳しくは|こちらから/.test(headline);
 }
 
 /* ---------- asking ---------- */

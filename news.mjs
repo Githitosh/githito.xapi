@@ -61,6 +61,7 @@ const CONF = {
   pause: num('pause', 4000),      // milliseconds between two searches
   rest: num('rest', 90000),       // milliseconds to rest when a search is refused
   patience: num('patience', 4),   // refusals in a row before a run stops searching
+  enough: num('enough', 100),     // a run stops asking once this many new replies may play: the rest comes with the next runs
   maxRests: num('maxRests', 6),   // rests one way in may take in a run: refusals that come and go must not make a run last for hours
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1',
@@ -460,6 +461,7 @@ async function build(lang) {
       if (n && !oldNews[p.id]) news[p.id] = { h: p.a[0], n: p.a[1], t: headline, g: genreFor(p.a, whole, lang), at: p.at || (g.status ? whenOf(g.status) : ''), full: whole };
     });
     if ((i / 3) % 10 === 9) console.log(`  ${lang} conversations: ${count.conversations} read, ${count.convReplies} replies, ${cands.length} may play`);
+    if (cands.length >= CONF.enough) { console.log(`  ${lang} conversations: ${cands.length} replies may play, which is enough for one run`); break; }
     await sleep(1500);
   }
   console.log(`  ${lang} conversations: ${targets.length} news posts chosen, ${count.conversations} read, ${count.convReplies} replies, ${cands.length} may play`);
@@ -476,6 +478,7 @@ async function build(lang) {
   let refusals = 0;
   let rests = 0;
   for (const p of CONF.noSearch ? [] : shuffle(plan).slice(0, CONF.searches)) {
+    if (cands.length >= CONF.enough) { console.log(`  ${lang}: ${cands.length} replies may play, which is enough for one run: no more searches`); break; }
     const handle = p.a[0];
     let list;
     try { list = await search(handle, lang, p.start); count.searches++; refusals = 0; }

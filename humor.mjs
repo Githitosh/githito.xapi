@@ -51,15 +51,15 @@ const CONF = {
   on: FILE.on !== false,
   langs: (Array.isArray(FILE.langs) ? FILE.langs : ['ja']).filter(l => l === 'ja' || l === 'en'),
   out: path.resolve(opt('out', path.join(HERE, 'public'))),
-  searches: num('searches', 40), // searches one run may make (about 20 replies each)
+  searches: num('searches', 60), // searches one run may make (about 20 replies each)
   timelines: num('timelines', 60), // people whose latest posts are read (those in the file and those met in the exchanges)
-  conversations: num('conversations', 260), // exchanges read whole (a post, what came before it, the replies under it)
+  conversations: num('conversations', 400), // exchanges read whole (a post, what came before it, the replies under it)
   enough: num('enough', 100),    // a run stops asking once it has this many new stories
   keep: num('keep', 1500),       // stories the file holds
   hours: num('hours', 72),       // a story leaves the file after three days
   pause: num('pause', 3000),     // milliseconds between two searches
   rest: num('rest', 240000),     // milliseconds a way in is left alone after it refuses (the others go on meanwhile)
-  minutes: num('minutes', 22),   // how long one run may last: a refusal passes in a quarter of an hour, so a run waits it out
+  minutes: num('minutes', 30),   // how long one run may last: a refusal passes in a quarter of an hour, so a run waits it out
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1',
 };
@@ -131,7 +131,7 @@ const UNSAFE_ROMANCE = /カニバ|食べちゃ|浮気|不倫|別れ|離婚|ブ�
 const YOUTH = /がこお[わつ]|がっこ[うー]|ガッコ|下校|登校|給食|宿題|勉強|塾|中間テスト|期末|模試|内申|日本史|世界史|数学|古文|現代文|物理|化学|生物の|英単語|単語帳|小テスト|追試|赤点|共テ|共通テスト|偏差値|志望校|席替え|クラス替え|体育|早退|保健室|学校|放課後|部活|修学旅行|制服|受験|担任|学年|文化祭|体育祭|授業|テスト|先生|クラス|\bschool\b|\bprom\b|\bhomework\b|\bgrade\b|\bclass\b|\bteacher\b/i;
 const MINOR_BIO = /(?:^|[^0-9])1[0-7]\s*(?:歳|才|y\/?o\b|years? old)|高[1-3１-３一二三](?:$|[^0-9０-９])|中[1-3１-３一二三](?:$|[^0-9０-９])|高校|中学|小学|学生|ＪＫ|ＪＣ|[LSF]?JK|\bJC\b|\bDK\b|\bminor\b|\bunder ?18\b|\bteen\b/i;
 /* An age in the words: nothing that may be about somebody under age plays here. */
-const AGE = /(?:^|[^0-9０-９\/:.月])(?:1[0-9]|[1-9])\s*(?:歳|才|さい)|(?:^|[^0-9０-９\/:.月])1[0-9](?:だね|になっ|にな[るり]|[?？])|未成年|十代|10代/;
+const AGE = /(?:^|[^0-9０-９\/:.月])(?:1[0-9]|[1-9])\s*(?:歳|才|さい)|(?:^|[^0-9０-９\/:.月])1[0-9](?:だね|になっ|にな[るり]|[?？]|こえ|超え|越え|過ぎ|すぎて|まで|なのに|やのに|未満)|未成年|十代|10代/;
 const EMOJI_HINT = /🍑|🍆|😏|🔞|💦|👅/u;
 const MOURN = /ご冥福|追悼|亡くな|お悔やみ|死去|\brip\b|passed away/i;
 /* Shops, media and bots greet everybody; a couple is two people. */
@@ -140,11 +140,11 @@ const NOT_A_PERSON = /公式|official|ニュース|新聞|news|放送|テレビ|
    a stranger, a fan writing to a star, a shop thanking a customer. */
 const POLITE = /さん|様|氏|先生|先輩|ございます|でした[。！!✨\s]|でしたね|いたします|致します|ください|下さい|ですね|ますね|ですよ|ましょう|です[！!。✨♡\s]|です$|ます[！!。✨\s]|ます$|ました|ますように|ありがとうござ/;
 /* Births and children are family news, not couple talk. */
-const FAMILY = /出産|妊娠|赤ちゃん|男の子|女の子|息子|娘|子供|子ども|こども|孫|ママ友|パパ友/;
+const FAMILY = /成人したら|成人する|うちの子|我が子|わが子|育児|子育て|保育園|幼稚園|出産|妊娠|赤ちゃん|男の子|女の子|息子|娘|子供|子ども|こども|孫|ママ友|パパ友/;
 /* Talk about works, streams and campaigns is not talk between a couple; "ALT" is a picture's caption. */
 const FAN = /拡散|リポスト|\bRT\b|フォロー|イラスト|作品|配信|推し|\bALT\b|当選|企画|プレゼント|お迎え|納品|ご依頼|スペース|リスナー|ライブ|チケット|グッズ|新曲|アルバム|\bMV\b|動画|投稿|写真集|てぇてぇ|てえてえ|尊[いすみ]|メンバー|キャプテン|センター|ペア|コンビ|絵柄|色味|描い|塗り|立ち絵|衣装|アバター|スキン|選びました|シーン|リスペクト|曲|歌っ|歌う|ゲーム|ガチャ|イベント|タグ|呼びタメ|タメ口|タメで|お言葉に甘え|尊い|\bFGO\b|とうらぶ|くっつ[くけ]|みんな|皆|ポスト|写真|解禁|戦型|対戦|勝[っちて]|かてた|負け|ランク|甘えてしま|デビュー/;
 /* Nothing of the body on this page. */
-const BODY = /ベッ[ドト]|添い寝|お風呂|風呂|脱[がぎぐい]|裸|舐|胸|尻|下着|えっち|エッチ|エロ|ホテル|お泊|泊ま|濡れ|お口|唇|くちびる|ばぶ|おっぱ|🍌|🍒|💦|🍑|🍆|🤱|👄|😛|🤤|🍼|👶/u;
+const BODY = /ベッ[ドト]|添い寝|お風呂|風呂|脱[がぎぐい]|裸|舐|胸|尻|下着|えっち|エッチ|エロ|ホテル|お泊|泊ま|濡れ|お口|唇|くちびる|ばぶ|おっぱ|乙π|π|デカすぎ|でかすぎ|巨乳|貧乳|谷間|太もも|ふともも|パンツ|🍌|🍒|💦|🍑|🍆|🤱|👄|😛|🤤|🍼|👶/u;
 const squash = text => String(text || '').toLowerCase().replace(/[\s　"'“”‘’「」『』（）()\[\]【】、。，．,.!?！？…・:：;；\-–—~〜ｗw]+/g, '');
 const postText = st => String((st && st.text) || '').replace(/https?:\/\/\S+/g, ' ').replace(/@\w+/g, ' ').replace(/[#＃]\S+/g, ' ').replace(/\s+/g, ' ').trim();
 const handleOf = st => String((st && st.author && st.author.screen_name) || '').replace(/^@+/, '');
@@ -472,8 +472,8 @@ async function build(lang) {
       if (pick) pick.done = true;
       return pick;
     };
-    for (let k = 0; k < 10 && open('conversation') && readThisRun < CONF.conversations && found.length < CONF.enough; k++) {
-      const batch = [next(), next(), next()].filter(Boolean);
+    for (let k = 0; k < 12 && open('conversation') && readThisRun < CONF.conversations && found.length < CONF.enough; k++) {
+      const batch = [next(), next(), next(), next()].filter(Boolean);
       if (!batch.length) break;
       const got = await Promise.all(batch.map(x => conversation(x.id).catch(e => { if (e instanceof Refused) return null; throw e; })));
       if (got.every(g => !g)) {

@@ -1,18 +1,17 @@
-# githito.xapi: collects by itself, every hour, and publishes the result on the branch "api".
+# githito.xapi: collects by itself, for ever, one run every half hour, and publishes the result on the branch "api".
 #
-# One run takes about an hour: the Humor page's stories (humor.mjs) and their publishing, what people reply to
-# the news and the headlines (news.mjs) and their publishing, then a wait until the hour is over, and the start
-# of the next run (next.mjs).
-# So the runs follow one another without anybody starting them. GitHub's own schedule starts runs hours late
-# or not at all (runs set for the hour came five hours late), which is why a run starts the next one itself;
-# the schedule below only starts things again if the chain should ever break.
+# One run: the Humor page's stories (humor.mjs) and their publishing, what people reply to the news and the
+# headlines (news.mjs) and their publishing, then a wait until half an hour has passed since the run began, and
+# the start of the next run (next.mjs). So the runs follow one another without anybody starting them and without
+# a schedule: GitHub's own schedule starts runs hours late or not at all (runs set for the hour came five hours
+# late). The schedule below is not what makes it run; it only starts the chain again if it should ever break.
 #
 # To stop it: set "loop": false in config.json (the run then ends without starting another), or disable the
-# workflow in the Actions tab.
+# workflow in the Actions tab. "cycle" in config.json is the minutes from one run to the next.
 name: Collect
 on:
   schedule:
-    - cron: '23 */3 * * *'   # every three hours, at 23 past: starts the chain again if it has stopped
+    - cron: '23 */3 * * *'   # only a safeguard: starts the chain again if it has stopped
   workflow_dispatch:
     inputs:
       rejudge:
@@ -41,7 +40,7 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
     env:
       CHAIN: ${{ (github.event_name == 'schedule' || inputs.chain) && '1' || '' }}
     steps:
@@ -102,8 +101,8 @@ jobs:
           git add -A
           git commit -q -m "API data $(date -u +%Y-%m-%dT%H:%MZ)"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" api
-      # The hourly chain (next.mjs): a run of the chain waits until an hour has passed since it began and
-      # starts the next run; a run started by hand starts the next one at once.
+      # The chain (next.mjs): a run waits until half an hour has passed since it began and starts the next run;
+      # a run started by hand starts the next one at once.
       - name: Start the next run
         if: ${{ always() }}
         env:

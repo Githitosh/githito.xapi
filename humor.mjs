@@ -59,7 +59,7 @@ const CONF = {
   hours: num('hours', 72),       // a story leaves the file after three days
   pause: num('pause', 3000),     // milliseconds between two searches
   rest: num('rest', 240000),     // milliseconds a way in is left alone after it refuses (the others go on meanwhile)
-  minutes: num('minutes', 30),   // how long one run may last: a refusal passes in a quarter of an hour, so a run waits it out
+  minutes: num('minutes', 14),   // how long one run may last: a refusal passes in a quarter of an hour, so a run waits it out
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1',
 };

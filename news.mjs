@@ -56,7 +56,7 @@ const CONF = {
   headSearches: num('headSearches', 50), // searches for the news accounts' own posts (the headlines)
   headKeep: num('headKeep', 900), // headlines the file holds
   headHours: num('headHours', 72), // a headline leaves the file after this many hours
-  minutes: num('minutes', 20),    // how long one run may ask: it runs every hour
+  minutes: num('minutes', 10),    // how long one run may ask: it runs every half hour
   hours: num('hours', 72),        // a reply leaves the file after this many hours
   window: num('window', 4),       // hours one search covers
   back: num('back', 36),          // how many hours back the searches reach

@@ -212,10 +212,14 @@ function newsOk(text, headline) {
 }
 
 /* The genre: the account's own when it has one; otherwise the genre the news names with one of its main words. */
+const SPORTS_WORD = /野球|サッカー|相撲|力士|場所|ゴルフ|テニス|バスケ|バレー|ラグビー|ボクシング|マラソン|駅伝|競馬|騎手|柔道|卓球|水泳|体操|フィギュア|スケート|スキー|陸上|五輪|オリンピック|W杯|ワールドカップ|リーグ|MLB|NPB|[JＪ][1-3１-３]|代表|選手|監督|コーチ|試合|優勝|連勝|連敗|勝利|敗れ|契約更改|年俸|移籍|ドラフト|投手|打者|捕手|本塁打|安打|登板|先発|得点|ゴール|金メダル|阪神|巨人|中日|広島|ヤクルト|DeNA|オリックス|ソフトバンク|ロッテ|楽天|西武|日本ハム|ドジャース|大谷/;
 function genreFor(account, text, lang) {
-  if (account && account[2]) return account[2];
   const g = genreOf(text, lang, WORDS.genres || []);
-  return g.word && GENRES.includes(g.genre) && g.genre !== 'politics' && g.genre !== 'safety' ? g.genre : '';
+  const named = g.word && GENRES.includes(g.genre) && g.genre !== 'politics' && g.genre !== 'safety' ? g.genre : '';
+  const own = (account && account[2]) || '';
+  /* A sports paper also writes about singers and actors: its news is sports when it says so. */
+  if (own === 'sports') return SPORTS_WORD.test(text) ? 'sports' : (named && named !== 'sports' ? named : '');
+  return own || named;
 }
 /* A reply that only says the news again says nothing. */
 const echoes = (reply, news) => { const r = squash(reply), n = squash(news); return r.length >= 8 && (n.includes(r.slice(0, 10)) || r.includes(n.slice(0, 12))); };

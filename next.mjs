@@ -45,7 +45,12 @@ async function main() {
       if (await waiting().catch(() => 0)) { console.log('Another run is waiting: it comes next and carries on.'); return; }
     }
   }
-  const res = await api('/actions/workflows/collect.yml/dispatches', { method: 'POST', body: JSON.stringify({ ref: 'main', inputs: { chain: 'true' } }) });
+  /* The next run is named with what the last hours took in (stats.mjs wrote it), so the list of runs shows it.
+     Should the workflow not know that input, the run is started without it: the chain comes first. */
+  const note = String(process.env.INTAKE_NOTE || '').replace(/\s+/g, ' ').trim().slice(0, 150);
+  const start = inputs => api('/actions/workflows/collect.yml/dispatches', { method: 'POST', body: JSON.stringify({ ref: 'main', inputs }) });
+  let res = await start(note ? { chain: 'true', note } : { chain: 'true' });
+  if (!res.ok && note) { console.log('With the name: HTTP ' + res.status + '; once more without it.'); res = await start({ chain: 'true' }); }
   console.log('The next run: HTTP ' + res.status + (res.ok ? '' : ' ' + (await res.text()).slice(0, 200)));
 }
 main().catch(e => { console.error(e.message || e); process.exit(0); });

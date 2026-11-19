@@ -4,6 +4,20 @@
 **自分専用のAPI**です。このリポジトリのプログラムが、Xの投稿とリプライを**30分ごとに自分で集め続け**、ファイルに保存します。
 ページはXを直接検索せず、そのファイルを読むだけです。プログラムもデータもこのリポジトリの中にあり、内容を変えられるのは持ち主だけです。
 
+## 取り込み量のグラフ
+
+![取り込み量（1時間ごと・直近48時間）](https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/intake.svg)
+
+1時間ごとに新しく取り込んだ数です（上：リプライニュースの会話、下：ニュースの見出し。日本時間）。実行のたびに `stats.mjs` が描き直します。
+同じものを次の3か所で見られます。
+
+- **このページの上のグラフ**（直近48時間）。
+- **Actions タブの実行の一覧**：実行の名前が、直近12時間の小さなグラフになっています
+  （例：`会話 ▂█▆█▇▇█▂█▆▃▄ 613組 ・ 見出し ▂▃▃▂▂▂▂▂▃▃█▂ 1193件（直近12時間）`）。棒が低い・`▁` が続くときは、取り込めていない時間です。
+- **それぞれの実行のページ（Summary）**：グラフ、その実行で増えた数、1時間ごとの表（直近24時間）、日ごとの表。
+
+数字そのものは `v1/stats.json` にあります（7日分）。あとでルールや古さで消えた分も、取り込んだ数には入ったままです。
+
 ## 自分で動き続ける仕組み（30分ごと、止めるまでずっと）
 
 - 定時実行（スケジュール）ではなく、**実行が終わるたびに次の実行を自分で始める**作りです（`next.mjs`）。1回の流れ：
@@ -122,6 +136,8 @@
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/news-ja.json` | ニュースページ用：Xのニュースの見出し（最大1500件）と、頼まれたアカウントへの真面目な返信（最大2000件） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/accounts.json` | ニュースページの設定から頼まれたアカウント（リプライを集める相手） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/humor-ja.json` | ユーモアページ用：恋愛のやりとり（最大600組） |
+| `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/stats.json` | 取り込み量：1時間ごとの新しい会話・見出しの数（7日分）と、最後の実行の数字 |
+| `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/intake.svg` | 取り込み量のグラフ（直近48時間の画像） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/index.json` | 最終更新の時刻と、ジャンルごとの件数 |
 
 ジャンル：`space` `politics` `science` `culture` `local` `entertainment` `safety` `sports` `food`
@@ -295,6 +311,7 @@ api.fxtwitter.com の元になっている公開プログラム（FxEmbed、MIT�
 | `collect.mjs` | 自動で集めるプログラム（Node 20 以上。追加のインストールは不要） |
 | `ingest.mjs` | 手で送った会話（Issue）を取り込むプログラム |
 | `rules.mjs` | 選ぶルールと、APIのファイルの書き出し（上の2つが共通で使う） |
+| `stats.mjs` | 取り込み量の集計とグラフ（`v1/stats.json`、`v1/intake.svg`、実行のページの表、次の実行の名前） |
 | `words.json` | 第1段階で検索するランダムな言葉（`any`）と、ジャンル分けに使う言葉 |
 | `config.json` | 設定 |
 | `.github/workflows/collect.yml` | 1日3回の定期実行と、ブランチ `api` への公開 |

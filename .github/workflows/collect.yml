@@ -9,6 +9,9 @@
 # To stop it: set "loop": false in config.json (the run then ends without starting another), or disable the
 # workflow in the Actions tab. "cycle" in config.json is the minutes from one run to the next.
 name: Collect
+# In the list of runs a run of the chain is named with a small graph of what the last 12 hours took in
+# (stats.mjs makes it, next.mjs passes it on), so the list itself shows whether the collection goes well.
+run-name: ${{ inputs.note || 'Collect' }}
 on:
   schedule:
     - cron: '23 */3 * * *'   # only a safeguard: starts the chain again if it has stopped
@@ -30,6 +33,10 @@ on:
         description: 'Start the next run when this one is done (the hourly chain)'
         type: boolean
         default: false
+      note:
+        description: 'The name of the run in the list (the chain writes the intake of the last hours here)'
+        type: string
+        default: ''
 permissions:
   contents: write
   actions: write
@@ -98,6 +105,12 @@ jobs:
         env:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node news.mjs --out public ${{ inputs.searches && format('--searches {0}', inputs.searches) || '' }}
+      # How much each hour took in (stats.mjs): v1/stats.json and the graph v1/intake.svg (the README shows it),
+      # and on this run's own page the graph, this run's numbers and a table with a bar for each hour.
+      - name: Intake graph
+        if: ${{ always() }}
+        continue-on-error: true
+        run: node stats.mjs --out public
       - name: Publish (branch api, one commit, no history kept)
         run: |
           cd public

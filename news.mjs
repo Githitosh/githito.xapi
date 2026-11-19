@@ -7,7 +7,7 @@
    page only reads.
 
      node news.mjs                   build once into ./public (Japanese)
-     node news.mjs --searches 40     fewer searches (160 unless told)
+     node news.mjs --searches 40     fewer searches (200 unless told)
      node news.mjs --dry             print the counts, write nothing
      node news.mjs --no-search       search nothing: judge the saved replies again and drop the old ones
 
@@ -19,7 +19,7 @@
      3. The post each reply answers is read once (many replies answer the same post). It must be the
         news account's own post, and the news must not be about a death, a crime, an accident, a
         disaster or a war: jokes under such news are not for a video.
-     4. The file keeps up to 2000 replies for 48 hours, at most a few for one piece of news.
+     4. The file keeps up to 2000 replies for 72 hours, at most a few for one piece of news.
    Settings are in config.json under "news"; "on": false turns it off. Node 20 or newer; no packages. */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -37,11 +37,11 @@ const CONF = {
   on: FILE.on !== false,
   langs: (Array.isArray(FILE.langs) ? FILE.langs : ['ja']).filter(l => l === 'ja'),
   out: path.resolve(opt('out', path.join(HERE, 'public'))),
-  searches: num('searches', 160), // searches one run may make (about 20 replies each)
+  searches: num('searches', 200), // searches one run may make (about 20 replies each)
   parents: num('parents', 500),   // news posts read in one run
   keep: num('keep', 2000),        // replies the file holds
   perNews: num('perNews', 8),     // replies kept for one piece of news
-  hours: num('hours', 48),        // a reply leaves the file after this many hours
+  hours: num('hours', 72),        // a reply leaves the file after this many hours
   window: num('window', 4),       // hours one search covers
   back: num('back', 36),          // how many hours back the searches reach
   pause: num('pause', 4000),      // milliseconds between two searches

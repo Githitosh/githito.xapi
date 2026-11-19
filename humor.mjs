@@ -16,7 +16,9 @@
      node humor.mjs --no-search      ask nothing: judge the saved stories again and drop the old ones
 
    It runs every hour. X is read through more than one way in, so that one being refused does not
-   stop a run, and a run stops asking once it has 100 new stories:
+   stop a run. A run works in rounds for up to 35 minutes: a way in that refuses is left alone for a
+   few minutes while the others go on (a refusal passes within a quarter of an hour). It stops asking
+   once it has 100 new stories:
      1. Searches of replies with loving words (FxTwitter), in the hours just past. Greetings are
         searched in the hours they are said: good mornings from 5 to 10 in Japan, good nights from 21
         to 2, welcome homes from 17 to 23.
@@ -55,9 +57,8 @@ const CONF = {
   keep: num('keep', 1000),       // stories the file holds
   hours: num('hours', 48),       // a story leaves the file after this many hours
   pause: num('pause', 3000),     // milliseconds between two searches
-  rest: num('rest', 60000),      // milliseconds to rest when a way in is refused
-  patience: num('patience', 3),  // refusals in a row before a run gives that way up
-  maxRests: num('maxRests', 3),  // rests one way in may take in a run
+  rest: num('rest', 240000),     // milliseconds a way in is left alone after it refuses (the others go on meanwhile)
+  minutes: num('minutes', 35),   // how long one run may last: a refusal passes in a quarter of an hour, so a run waits it out
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1',
 };
@@ -126,7 +127,7 @@ const SHORT = { ja: 30, en: 90 };
 const LONG = { ja: 60, en: 180 };
 /* Not for this page: partings and quarrels, school age, children beside couple talk, innuendo. */
 const UNSAFE_ROMANCE = /カニバ|食べちゃ|浮気|不倫|別れ|離婚|ブロック|死ね|殺|嫌い|最低|ストーカー|cheat|divorce|break ?up|hate you/i;
-const YOUTH = /がこお[わつ]|がっこ[うー]|ガッコ|下校|登校|給食|宿題|勉強|塾|中間テスト|期末|模試|内申|学校|放課後|部活|修学旅行|制服|受験|担任|学年|文化祭|体育祭|授業|テスト|先生|クラス|\bschool\b|\bprom\b|\bhomework\b|\bgrade\b|\bclass\b|\bteacher\b/i;
+const YOUTH = /がこお[わつ]|がっこ[うー]|ガッコ|下校|登校|給食|宿題|勉強|塾|中間テスト|期末|模試|内申|日本史|世界史|数学|古文|現代文|物理|化学|生物の|英単語|単語帳|小テスト|追試|赤点|共テ|共通テスト|偏差値|志望校|席替え|クラス替え|体育|早退|保健室|学校|放課後|部活|修学旅行|制服|受験|担任|学年|文化祭|体育祭|授業|テスト|先生|クラス|\bschool\b|\bprom\b|\bhomework\b|\bgrade\b|\bclass\b|\bteacher\b/i;
 const MINOR_BIO = /(?:^|[^0-9])1[0-7]\s*(?:歳|才|y\/?o\b|years? old)|高[1-3１-３一二三](?:$|[^0-9０-９])|中[1-3１-３一二三](?:$|[^0-9０-９])|高校|中学|小学|学生|ＪＫ|ＪＣ|[LSF]?JK|\bJC\b|\bDK\b|\bminor\b|\bunder ?18\b|\bteen\b/i;
 /* An age in the words: nothing that may be about somebody under age plays here. */
 const AGE = /(?:^|[^0-9０-９\/:.月])(?:1[0-9]|[1-9])\s*(?:歳|才|さい)|(?:^|[^0-9０-９\/:.月])1[0-9](?:だね|になっ|にな[るり]|[?？])|未成年|十代|10代/;
@@ -140,7 +141,7 @@ const POLITE = /さん|様|氏|先生|先輩|ございます|でした[。！!�
 /* Births and children are family news, not couple talk. */
 const FAMILY = /出産|妊娠|赤ちゃん|男の子|女の子|息子|娘|子供|子ども|こども|孫|ママ友|パパ友/;
 /* Talk about works, streams and campaigns is not talk between a couple; "ALT" is a picture's caption. */
-const FAN = /拡散|リポスト|\bRT\b|フォロー|イラスト|作品|配信|推し|\bALT\b|当選|企画|プレゼント|お迎え|納品|ご依頼|スペース|リスナー|ライブ|チケット|グッズ|新曲|アルバム|\bMV\b|動画|投稿|写真集|てぇてぇ|てえてえ|尊[いすみ]|メンバー|キャプテン|センター|ペア|コンビ|選びました|シーン|リスペクト|曲|歌っ|歌う|ゲーム|ガチャ|イベント|タグ|呼びタメ|タメ口|タメで|お言葉に甘え|尊い|\bFGO\b|とうらぶ|くっつ[くけ]|みんな|皆|ポスト|写真|解禁|戦型|対戦|勝[っちて]|かてた|負け|ランク|甘えてしま|デビュー/;
+const FAN = /拡散|リポスト|\bRT\b|フォロー|イラスト|作品|配信|推し|\bALT\b|当選|企画|プレゼント|お迎え|納品|ご依頼|スペース|リスナー|ライブ|チケット|グッズ|新曲|アルバム|\bMV\b|動画|投稿|写真集|てぇてぇ|てえてえ|尊[いすみ]|メンバー|キャプテン|センター|ペア|コンビ|絵柄|色味|描い|塗り|立ち絵|衣装|アバター|スキン|選びました|シーン|リスペクト|曲|歌っ|歌う|ゲーム|ガチャ|イベント|タグ|呼びタメ|タメ口|タメで|お言葉に甘え|尊い|\bFGO\b|とうらぶ|くっつ[くけ]|みんな|皆|ポスト|写真|解禁|戦型|対戦|勝[っちて]|かてた|負け|ランク|甘えてしま|デビュー/;
 /* Nothing of the body on this page. */
 const BODY = /ベッ[ドト]|添い寝|お風呂|風呂|脱[がぎぐい]|裸|舐|胸|尻|下着|えっち|エッチ|エロ|ホテル|お泊|泊ま|濡れ|お口|唇|くちびる|ばぶ|おっぱ|🍌|🍒|💦|🍑|🍆|🤱|👄|😛|🤤|🍼|👶/u;
 const squash = text => String(text || '').toLowerCase().replace(/[\s　"'“”‘’「」『』（）()\[\]【】、。，．,.!?！？…・:：;；\-–—~〜ｗw]+/g, '');
@@ -323,92 +324,20 @@ async function build(lang) {
   old.forEach(s => [s.a.handle, s.b.handle].forEach(h => { const k = String(h).toLowerCase(); perPerson.set(k, (perPerson.get(k) || 0) + 1); }));
   const off = CONF.noSearch;
 
-  /* 1. Searches of loving replies, each kind by its share, in the hours just past. */
+  /* The searches this run would make: each kind by its share, in the hours just past. */
   const plan = [];
   (SEARCHES[lang] || []).forEach(k => {
     const n = Math.max(1, Math.round(CONF.searches * k.share * (inItsHours(k.hours) ? 1 : 1 / 3)));
     for (let i = 0; i < n; i++) plan.push({ kind: k.kind, q: k.q[i % k.q.length], start: windowStart(k.hours) });
   });
-  const cands = [];
-  const seen = new Set();
-  let refusals = 0;
-  let rests = 0;
-  for (const p of off ? [] : shuffle(plan).slice(0, CONF.searches)) {
-    let list;
-    try { list = await search(p.q, lang, p.start); count.searches++; refusals = 0; }
-    catch (e) {
-      if (!(e instanceof Refused)) throw e;
-      if (++refusals >= CONF.patience || ++rests > CONF.maxRests) { console.log(`  search ${e.message}: going on without more searches`); break; }
-      console.log(`  search ${e.message}: resting`);
-      await sleep(CONF.rest);
-      continue;
-    }
-    count.replies += list.length;
-    let got = 0;
-    list.forEach(st => {
-      const handle = handleOf(st);
-      const text = romanceText(st, lang);
-      const parent = parentOf(st);
-      const id = statusId(st);
-      if (!handle || !text || !id || !parent.id || !LOVE[lang].test(text) || charLen(text) > LONG[lang]) return;
-      if (followers(st) > 20000 || parent.who.toLowerCase() === handle.toLowerCase()) return;
-      const tk = squash(text).slice(0, 50);
-      if (seen.has(id) || seen.has(tk) || have.has(id) || have.has(parent.id) || conv[id]) return;
-      seen.add(id);
-      seen.add(tk);
-      cands.push({ want: p.kind, id, st, parent, score: replyScore(text, lang) });
-      got++;
-    });
-    console.log(`  ${lang} ${p.kind} "${p.q.slice(0, 28)}…": ${list.length} replies, ${got} may play (${cands.length} so far)`);
-    await sleep(CONF.pause);
-  }
-  count.candidates = cands.length;
-
-  /* 2. People already in the file: their latest posts that somebody has answered. No search is needed
-     for these, so a run finds new exchanges even when every search is refused. */
-  const people = shuffle([...new Set(old.map(s => s.a.handle))]).slice(0, CONF.timelines);
-  const posts = [];
-  refusals = 0;
-  rests = 0;
-  for (const handle of off ? [] : people) {
-    let list;
-    try { list = await timeline(handle); count.timelines++; refusals = 0; }
-    catch (e) {
-      if (!(e instanceof Refused)) throw e;
-      if (++refusals >= CONF.patience || ++rests > CONF.maxRests) { console.log(`  timelines ${e.message}: going on without more`); break; }
-      await sleep(Math.min(CONF.rest, 20000));
-      continue;
-    }
-    noteYouth(list);
-    if (skipped(handle)) continue;
-    list.forEach(st => {
-      const id = statusId(st);
-      const text = romanceText(st, lang);
-      if (!id || !text || parentOf(st).id || have.has(id) || conv[id] || seen.has(id)) return;
-      if ((Number(st.replies) || 0) < 1 || charLen(text) > LONG[lang] || followers(st) > 20000) return;
-      if (Date.now() - Date.parse(whenOf(st) || 0) > 30 * 3600e3) return;
-      seen.add(id);
-      posts.push({ id, st, replies: Number(st.replies) || 0 });
-    });
-    await sleep(1200);
-  }
-  count.posts = posts.length;
-  console.log(`  ${lang} timelines: ${count.timelines} of ${people.length} people read, ${posts.length} answered posts`);
-
-  /* 3. What is read whole: the replies found by search (the best of each kind in turn), the answered
-     posts, and the newest exchanges of the file, which may have gone on since. */
-  const byKind = {};
-  cands.sort((x, y) => y.score - x.score).forEach(c => { (byKind[c.want] = byKind[c.want] || []).push(c); });
-  const ranked = [];
-  for (let k = 0; Object.values(byKind).some(l => l[k]); k++) Object.values(byKind).forEach(l => { if (l[k]) ranked.push(l[k]); });
+  const searches = shuffle(plan).slice(0, CONF.searches);
+  /* People already in the file: their latest posts that somebody has answered need no search. */
+  const people = shuffle([...new Set(old.map(s => s.a.handle))]).filter(h => !skipped(h)).slice(0, CONF.timelines);
+  const cands = [];   // loving replies found by search, to be read as exchanges
+  const posts = [];   // answered posts from the timelines, to be read as exchanges
+  /* The newest exchanges of the file may have gone on since: they are read again last. */
   const again = old.filter(s => s.mutual && !conv[s.id] && Date.now() - Date.parse(s.found || 0) < 6 * 3600e3).slice(0, 40).map(s => ({ id: s.id }));
-  const reading = [];
-  posts.sort((x, y) => y.replies - x.replies);
-  for (let k = 0; k < Math.max(ranked.length, posts.length); k++) { if (ranked[k]) reading.push(ranked[k]); if (posts[k]) reading.push(posts[k]); }
-  again.forEach(x => reading.push(x));
-  const todo = reading.slice(0, CONF.conversations);
-
-  /* 4. Each exchange, and the pairs in it that may play (two at most from one exchange). */
+  const seen = new Set();
   const found = [];
   const keep = pair => {
     const ak = squash(pair.a.text).slice(0, 50), bk = squash(pair.b.text).slice(0, 50);
@@ -422,32 +351,125 @@ async function build(lang) {
     found.push(pair);
     return true;
   };
-  refusals = 0;
-  rests = 0;
-  for (let i = 0; i < todo.length && !off; i += 3) {
-    if (found.length >= CONF.enough) { console.log(`  ${lang}: ${found.length} new stories, which is enough for one run`); break; }
-    const batch = todo.slice(i, i + 3);
-    const got = await Promise.all(batch.map(x => conversation(x.id).catch(e => { if (e instanceof Refused) return null; throw e; })));
-    if (got.every(g => !g)) {
-      /* Refused: the reply's own post another way, then a rest. */
-      const others = await Promise.all(batch.map(x => (x.st && x.parent ? parentOtherWay(x.parent.who, x.parent.id) : null)));
-      others.forEach((pst, k) => { if (!pst) return; count.otherWay++; noteYouth([pst, batch[k].st]); const pair = pairFrom(pst, batch[k].st, lang); if (pair) keep(pair); });
-      if (++refusals >= CONF.patience || ++rests > CONF.maxRests) { console.log('  conversations refused: stopping with what was found'); break; }
-      await sleep(Math.min(CONF.rest, 30000));
-      continue;
+
+  /* One run is a number of rounds: a few searches, a few timelines, then the exchanges waiting to be
+     read. A way in that refuses is left alone for some minutes while the others go on; a refusal
+     passes within a quarter of an hour, so the run waits it out instead of giving up. The run ends
+     when it has enough new stories, when nothing is left to ask, or when its time is up. */
+  const deadline = Date.now() + CONF.minutes * 60e3;
+  const restUntil = { search: 0, timeline: 0, conversation: 0 };
+  const refusedTimes = { search: 0, timeline: 0, conversation: 0 };
+  const open = way => Date.now() >= restUntil[way];
+  const refuse = (way, e) => { refusedTimes[way]++; restUntil[way] = Date.now() + CONF.rest; console.log(`  ${way} ${e ? e.message : 'refused'}: left alone for ${Math.round(CONF.rest / 60000)} minutes`); };
+  let si = 0;
+  let pi = 0;
+  let ci = 0;
+  let qi = 0;
+  let ai = 0;
+  let readThisRun = 0;
+  while (!off && Date.now() < deadline && found.length < CONF.enough) {
+    let did = 0;
+    /* A. Searches of loving replies. */
+    for (let k = 0; k < 6 && si < searches.length && open('search'); k++) {
+      const p = searches[si];
+      let list;
+      try { list = await search(p.q, lang, p.start); }
+      catch (e) { if (!(e instanceof Refused)) throw e; refuse('search', e); break; }
+      si++;
+      did++;
+      count.searches++;
+      count.replies += list.length;
+      let got = 0;
+      list.forEach(st => {
+        const handle = handleOf(st);
+        const text = romanceText(st, lang);
+        const parent = parentOf(st);
+        const id = statusId(st);
+        if (!handle || !text || !id || !parent.id || !LOVE[lang].test(text) || charLen(text) > LONG[lang]) return;
+        if (followers(st) > 20000 || parent.who.toLowerCase() === handle.toLowerCase() || skipped(handle)) return;
+        const tk = squash(text).slice(0, 50);
+        if (seen.has(id) || seen.has(tk) || have.has(id) || have.has(parent.id) || conv[id]) return;
+        seen.add(id);
+        seen.add(tk);
+        cands.push({ want: p.kind, id, st, parent, score: replyScore(text, lang) });
+        got++;
+      });
+      count.candidates += got;
+      console.log(`  ${lang} ${p.kind} "${p.q.slice(0, 28)}…": ${list.length} replies, ${got} may play`);
+      await sleep(CONF.pause);
     }
-    refusals = 0;
-    got.forEach((list, k) => {
-      if (!list) return;
-      count.conversations++;
-      via.conversation++;
-      conv[batch[k].id] = stamp();
-      let n = 0;
-      pairsIn(list, lang).forEach(pair => { if (n < 2 && keep(pair)) n++; });
-    });
-    await sleep(1500);
+    /* B. Timelines. */
+    for (let k = 0; k < 5 && pi < people.length && open('timeline'); k++) {
+      const handle = people[pi];
+      let list;
+      try { list = await timeline(handle); }
+      catch (e) { if (!(e instanceof Refused)) throw e; refuse('timeline', e); break; }
+      pi++;
+      did++;
+      count.timelines++;
+      noteYouth(list);
+      if (!skipped(handle)) list.forEach(st => {
+        const id = statusId(st);
+        const text = romanceText(st, lang);
+        if (!id || !text || parentOf(st).id || have.has(id) || conv[id] || seen.has(id)) return;
+        if ((Number(st.replies) || 0) < 1 || charLen(text) > LONG[lang] || followers(st) > 20000) return;
+        if (Date.now() - Date.parse(whenOf(st) || 0) > 30 * 3600e3) return;
+        seen.add(id);
+        posts.push({ id, st, replies: Number(st.replies) || 0 });
+        count.posts++;
+      });
+      await sleep(1200);
+    }
+    /* C. The exchanges waiting to be read: the best replies and the most answered posts in turn, then
+       the file's newest exchanges. Two pairs at most from one exchange. */
+    cands.sort((x, y) => (x.done ? 1 : 0) - (y.done ? 1 : 0) || y.score - x.score);
+    posts.sort((x, y) => (x.done ? 1 : 0) - (y.done ? 1 : 0) || y.replies - x.replies);
+    const next = () => {
+      const c = cands.find(x => !x.done), p = posts.find(x => !x.done);
+      const pick = (qi++ % 2 === 0 ? (c || p) : (p || c)) || (ai < again.length ? again[ai++] : null);
+      if (pick) pick.done = true;
+      return pick;
+    };
+    for (let k = 0; k < 10 && open('conversation') && readThisRun < CONF.conversations && found.length < CONF.enough; k++) {
+      const batch = [next(), next(), next()].filter(Boolean);
+      if (!batch.length) break;
+      const got = await Promise.all(batch.map(x => conversation(x.id).catch(e => { if (e instanceof Refused) return null; throw e; })));
+      if (got.every(g => !g)) {
+        /* Refused: the post each reply answers is read another way, and the exchanges wait their turn again. */
+        const others = await Promise.all(batch.map(x => (x.st && x.parent ? parentOtherWay(x.parent.who, x.parent.id) : null)));
+        others.forEach((pst, n) => {
+          if (!pst) { batch[n].done = false; return; }
+          count.otherWay++;
+          noteYouth([pst, batch[n].st]);
+          const pair = pairFrom(pst, batch[n].st, lang);
+          if (pair) keep(pair);
+          did++;
+        });
+        refuse('conversation');
+        break;
+      }
+      got.forEach((list, n) => {
+        if (!list) { batch[n].done = false; return; }
+        did++;
+        readThisRun++;
+        count.conversations++;
+        via.conversation++;
+        conv[batch[n].id] = stamp();
+        let pairs = 0;
+        pairsIn(list, lang).forEach(pair => { if (pairs < 2 && keep(pair)) pairs++; });
+      });
+      await sleep(1500);
+    }
+    const waiting = cands.some(x => !x.done) || posts.some(x => !x.done) || ai < again.length;
+    const more = si < searches.length || pi < people.length || waiting;
+    if (!more) break;
+    console.log(`  ${lang} round: ${count.searches} searches, ${count.timelines} timelines, ${count.conversations} exchanges read, ${found.length} new stories`);
+    /* Nothing could be asked this round: wait for the way in that opens first. */
+    if (!did) await sleep(Math.max(15000, Math.min(60000, Math.min(...Object.values(restUntil).filter(t => t > Date.now()).concat(Date.now() + 60000)) - Date.now())));
   }
+  if (found.length >= CONF.enough) console.log(`  ${lang}: ${found.length} new stories, which is enough for one run`);
   count.stories = found.length;
+  count.refused = refusedTimes;
 
   /* The file: this run's stories and the earlier ones that are still young and still may play. */
   const fresh = s => Date.now() - Date.parse(s.found || 0) < CONF.hours * 3600e3;

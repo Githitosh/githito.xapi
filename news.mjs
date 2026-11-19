@@ -283,6 +283,8 @@ function headGenre(account, text, lang) {
 function headOk(text, headline) {
   if (!headline || charLen(headline) < 10 || (openBracket(headline) && !/…$/.test(headline))) return false;
   if ((headline.match(/[぀-ヿ一-鿿]/g) || []).length < 5) return false;
+  /* A line dressed up with ＼ ／ or arrows is an advertisement for the account's own page, not a headline. */
+  if (/^[＼\\／/▶▷►→↓⇒]|[／/＼\\]$/.test(headline.trim())) return false;
   return !NOT_A_HEADLINE.test(text) && !SPAM.test(text) && emojiCount(headline) < 2 && !/質問箱|お届けします|募集中|配信中|放送中|発売中|公開中|好評|詳しくは|こちらから/.test(headline);
 }
 

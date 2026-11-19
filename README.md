@@ -92,9 +92,13 @@
 - 1つのニュースにつき返信は8件まで。最大2000件、72時間たったものは消えます。真面目な返信は全体の1〜2割なので、1回の実行で増えるのは数十〜200件ほどです。
 
 **2. ニュースの見出し（`heads`）**
-- ニュースアカウントの最新の投稿そのもの（1回の実行で50アカウント。頼まれたアカウントと主な30は毎回、残りは順番に）。政治・治安も含み、ジャンルを付けます。
-- ページがふだん流すのはこれです。
-- 見出しには**英語**（`e`、Google翻訳。1回の実行で新しい見出し最大400件）と、投稿の続きの短い1行（`d`、あれば）を付けます。
+- ニュースアカウントの最新の投稿そのもの。政治・治安も含み、ジャンルを付けます。ページはふだんこれを流します。
+- 集め方はユーモアと同じ**ラウンド方式**です：1回の実行（最大12分）のあいだ、アカウントを順に読みます。入口は2つ
+  （**タイムライン**と、そのアカウントの投稿の**検索**）。片方が断られたら2分休ませてもう片方で続け、読めなかったアカウントは順番を後ろに回してもう一度試します。
+  主な30アカウントは毎回、残りは「前に読んでから時間がたった順」に読むので、毎回ちがうアカウントの新しい投稿が入ります。
+- **再生順は新しいもの優先**です（見出しの新しさ＋最大3時間ぶんの乱数）。ページは上から、まだ見ていないものを流すので、更新のたびに新しいニュースが出ます。
+- 新しい順に最大1500件（ページがファイル全体を読むため）。3日たったものは消えます。
+- 見出しには**英語**（`e`、Google翻訳。GitHub 上からは断られることが多く、付かなかった分はページ側が翻訳を取りにいきます）と、投稿の続きの短い1行（`d`、あれば）を付けます。
   ニュースのページは、英語の大見出し・小見出しと日本語の行を並べたカードにして流します。
 - 最大900件、3日たったものは消えます。
 
@@ -116,7 +120,7 @@
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/talks-ja.json` | その日の会話すべて（日本語、最大500件） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/search/ja/food.json` | ジャンルごとの会話（`food` の部分がジャンル） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/match-ja.json` | マッチングニュース用：単独で読める投稿（`posts`）と、どの投稿にも合う一言（`lines`） |
-| `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/news-ja.json` | ニュースページ用：Xのニュースの見出し（最大900件）と、頼まれたアカウントへの真面目な返信（最大2000件） |
+| `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/news-ja.json` | ニュースページ用：Xのニュースの見出し（最大1500件）と、頼まれたアカウントへの真面目な返信（最大2000件） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/accounts.json` | ニュースページの設定から頼まれたアカウント（リプライを集める相手） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/humor-ja.json` | ユーモアページ用：恋愛のやりとり（最大600組） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/index.json` | 最終更新の時刻と、ジャンルごとの件数 |

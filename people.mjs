@@ -104,8 +104,12 @@ async function ownPosts(handle) {
 }
 /* Their own posts of the last three days that many liked (one in twenty thousand followers, a hundred at
    least): the best two of each person a run. */
+/* Well-known people's own words are not held to the topic filters (politics, advertisement): what they post
+   is said in public under their own name. Only what is never shown is left out: cruel, personal, slander,
+   and alcohol and smoking (the pages are read by the young too). */
+const famousOk = t => !(cruel(t) || personal(t) || slander(t) || alcohol(t) || tobacco(t));
 async function famous(lang, people, have, readAt, notThem, minutes) {
-  const ok = lang === 'en' ? wordsOkEn : wordsOk;
+  const ok = famousOk;
   /* Those read longest ago first; an account found not to be the person waits a week. */
   const list = (FAMOUS[lang] || []).filter(([h]) => !notThem[h] || Date.now() - Date.parse(notThem[h]) > 7 * 24 * 3600e3)
     .sort((x, y) => (Date.parse(readAt[x[0]] || 0) || 0) - (Date.parse(readAt[y[0]] || 0) || 0));
@@ -120,7 +124,9 @@ async function famous(lang, people, have, readAt, notThem, minutes) {
     const own = posts.filter(st => st && st.author && String(st.author.screen_name).toLowerCase() === h.toLowerCase() && !st.reposted_by && !(st.replying_to && (st.replying_to.status || st.replying_to.screen_name)));
     const a = own[0] && own[0].author;
     if (!a) { await sleep(1000); continue; }
-    const them = key ? String(a.name || '').toLowerCase().includes(key.toLowerCase()) && (Number(a.followers) || 0) >= 50000 : (Number(a.followers) || 0) >= 200000;
+    /* The person: the expected name (with 50,000 followers), or 100,000 followers whatever the name. */
+    const fl = Number(a.followers) || 0;
+    const them = (key && String(a.name || '').toLowerCase().includes(key.toLowerCase()) && fl >= 50000) || fl >= 100000;
     if (!them || a.protected) { notThem[h] = stamp(); await sleep(1000); continue; }
     answered++;
     const least = Math.max(100, Math.round((Number(a.followers) || 0) / 20000));
@@ -151,7 +157,7 @@ async function gather(lang, posts, minutes) {
   /* (A reply under news that is politics or public safety is left out too, whenever it was kept.) */
   const headOf = new Map((Array.isArray(news.heads) ? news.heads : []).map(x => [String(x.id), x]));
   const underOk = p => { const x = p.on && headOf.get(String(p.on)); return !x || (!NO_GENRE.has(x.g) && !politics.test(x.t + ' ' + (x.d || ''))); };
-  const people = (Array.isArray(before.people) ? before.people : []).filter(p => p && p.id && p.t && fresh(p.found) && ok(p.t) && underOk(p));
+  const people = (Array.isArray(before.people) ? before.people : []).filter(p => p && p.id && p.t && fresh(p.found) && (p.own ? famousOk(p.t) : ok(p.t) && underOk(p)));
   const have = new Set(people.map(p => p.id));
   /* The most answered news of the last day, not read in the last two days, politics and safety left out. */
   const heads = (Array.isArray(news.heads) ? news.heads : [])

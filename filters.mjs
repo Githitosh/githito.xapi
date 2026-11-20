@@ -57,7 +57,7 @@ export const SLANDER_WORDS = [
   '誹謗|中傷|悪口|陰口|アンチ(?!エイジ)|袋叩き|叩かれ|嫌われ|ハブられ|仲間はずれ|いじめ|虐め|無視され|ブロックされ',
 ];
 /* Talk about alcohol (Reply News: a loving greeting is no place for drinking). 酒井, 酒田 are names. */
-export const ALCOHOL = new RegExp('お酒|酒(?![井田々])|飲酒|禁酒|晩酌|泥酔|酔っ|酔い|酔う|酔え|二日酔|ほろ酔|ほろよい|呑[みむまん]|飲み会|飲みに|飲み過ぎ|飲みすぎ|飲んだくれ|宅飲み|家飲み|居酒屋|酒場|乾杯|カンパイ|かんぱい|ビール|ビアガーデン|ビアホール|ビアバー|ワイン|日本酒|焼酎|ハイボール|チューハイ|酎ハイ|サワー|カクテル|ウイスキー|ウィスキー|ウォッカ|テキーラ|シャンパン|梅酒|生中(?!継)|ストゼロ|アルコール|酒豪|ベロンベロン|🍺|🍻|🥂|🍷|🍸|🍹|🥃|🍶|\\b(?:beers?|wine|drunk|alcohol|whiske?y|vodka|tequila|cocktails?|hangover|tipsy|booze|sake)\\b', 'i');
+export const ALCOHOL = new RegExp('お酒|酒(?![井田々])|飲酒|禁酒|晩酌|泥酔|酔っ|酔い|酔う|酔え|二日酔|ほろ酔|ほろよい|呑[みむまん]|飲み会|飲みに|飲み歩き|はしご酒|ハシゴ酒|飲み過ぎ|飲みすぎ|飲んだくれ|宅飲み|家飲み|居酒屋|酒場|乾杯|カンパイ|かんぱい|ビール|ビアガーデン|ビアホール|ビアバー|ワイン|日本酒|焼酎|ハイボール|チューハイ|酎ハイ|サワー|カクテル|ウイスキー|ウィスキー|ウォッカ|テキーラ|シャンパン|梅酒|生中(?!継)|ストゼロ|アルコール|酒豪|ベロンベロン|🍺|🍻|🥂|🍷|🍸|🍹|🥃|🍶|\\b(?:beers?|wine|drunk|alcohol|whiske?y|vodka|tequila|cocktails?|hangover|tipsy|booze|sake)\\b', 'i');
 /* (Car and sea sickness are no drinking.) */
 export const alcohol = text => ALCOHOL.test(String(text || '').replace(/(?:車|船|乗り物)酔い/g, ''));
 /* Talk about smoking, its words and its emoji (the pages are read by the young too). */

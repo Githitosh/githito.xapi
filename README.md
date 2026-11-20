@@ -106,7 +106,8 @@
 **アカウントの頼み方（`account`）**
 1. ニュースのページの設定 →「リプライとコメントを流すアカウント」にアカウントを入れて「追加」し、「xapiに送る」を押します。
    タイトル `account`、本文にアカウントが1行ずつ入った Issue の画面が開くので、Submit を押します（手で作るときも同じ形です）。
-2. Issue の本文が `v1/accounts.json` の一覧になります（最大8つ。送るたびに置き換わります。本文が空か `none` なら一覧を空にします）。
+2. Issue の本文は、公開のファイルにはしません。ユーモアの記録と同じ非公開リポジトリ（`githito.memo`）の `accounts.json` に保存します（最大8つ。送るたびに置き換わります。本文が空か `none` なら一覧を空にします）。
+   必要な設定は、上の「おもしろい恋愛リプライをするアカウントの記録」と同じです（`MEMO_TOKEN` と、名前を変えた場合の `MEMO_REPO`）。`MEMO_TOKEN` がないあいだは一覧を保存しません。公開用の `v1/accounts.json` は置きません。名前は、この README にも、実行のログにも、Issue の結果コメントにも書きません。
    読むのは、このリポジトリの持ち主が作った Issue だけです。Issue は結果のコメント付きで閉じられます。
 3. 次の実行（30分ごと）から、そのアカウントの投稿と、それに付いたリプライを集めます。ニュースのアカウントでないもの（個人など）の投稿には
    `"q": 1` が付き、ページはそのアカウントを頼んだ人にだけ流します。
@@ -169,7 +170,6 @@
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/search/ja/food.json` | ジャンルごとの会話（`food` の部分がジャンル） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/match-ja.json` | マッチングニュース用：単独で読める投稿（`posts`）と、どの投稿にも合う一言（`lines`） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/news-ja.json` | ニュースページ用：Xのニュースの見出し（最大1500件）と、頼まれたアカウントへの真面目な返信（最大2000件） |
-| `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/accounts.json` | ニュースページの設定から頼まれたアカウント（リプライを集める相手） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/humor-ja.json` | ユーモアページ用：恋愛のやりとり（最大600組） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/stats.json` | 取り込み量：1時間ごとの新しい会話・見出しの数（7日分）と、最後の実行の数字 |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/intake.svg` | 取り込み量のグラフ（直近48時間の画像） |

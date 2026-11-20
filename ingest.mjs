@@ -2,9 +2,11 @@
 /* githito.xapi: talks sent by hand, and the accounts whose replies the News page may play.
 
    An issue titled "account" lists X accounts, one on each line (@name, name or a link to the account).
-   It replaces the list in v1/accounts.json: news.mjs reads those accounts' posts and the replies under
-   them from its next run, and the News page plays them for a reader who added the account in Settings.
-   An issue titled "account" whose body is empty or "none" clears the list.
+   It replaces the list in accounts.json in the private memo (--memo or XAPI_MEMO_DIR): the same folder
+   as humor-memo-<lang>.json, never a public file. news.mjs reads that list and collects those accounts'
+   posts and the replies under them from its next run. The News page plays them for a reader who added
+   the account in Settings. An issue titled "account" whose body is empty or "none" clears the list.
+   Names are not printed. A public v1/accounts.json left by an older run is taken away.
 
    The owner finds a post and its replies on X, and sends their links here as an issue titled "talk":
    the first link is the post, the links after it are replies. This program reads each link through X's
@@ -15,7 +17,7 @@
      node ingest.mjs --urls <post> <reply> ...    one talk from links, for trying it by hand
      node ingest.mjs --accounts @name @name ...   the account list, by hand (--accounts none clears it)
      node ingest.mjs --dry ...                    print what would be added, write nothing */
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { CJK, plain, talkPost, pickReplies, stamp, readJson, writeApi, writeIndex, young, readEmbed, genreOf } from './rules.mjs';
@@ -28,6 +30,8 @@ const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 &&
 let FILE = {};
 try { FILE = JSON.parse(await readFile(path.join(HERE, 'config.json'), 'utf8')); } catch (e) {}
 const OUT = path.resolve(opt('out', path.join(HERE, 'public')));
+/* The private folder the account list is kept in, beside the humor memo. Empty: the list is not saved. */
+const MEMO = opt('memo', process.env.XAPI_MEMO_DIR || '') ? path.resolve(opt('memo', process.env.XAPI_MEMO_DIR || '')) : '';
 const KEEP = FILE.keep || 500;
 const DRY = flag('dry');
 const LINK = /https?:\/\/(?:mobile\.|www\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status(?:es)?\/(\d+)/gi;
@@ -112,28 +116,101 @@ function accountsFrom(body) {
   });
   return out.slice(0, MAX_ACCOUNTS);
 }
-async function setAccounts(names) {
-  const file = path.join(OUT, 'v1', 'accounts.json');
-  const before = await readJson(file, { accounts: [] });
-  const since = new Map((Array.isArray(before.accounts) ? before.accounts : []).filter(a => a && a.h).map(a => [String(a.h).toLowerCase(), a.since]));
-  const accounts = names.map(h => ({ h, since: since.get(h.toLowerCase()) || stamp() }));
-  if (DRY) { console.log('accounts: ' + JSON.stringify(accounts)); return; }
+/* Writes the list into the private memo. The count is printed; the names are not. */
+async function writeAccountList(names, since) {
+  if (!MEMO) { console.log('No private folder for the account list: it is not saved.'); return false; }
+  const kept = (since instanceof Map) ? since : new Map();
+  const accounts = names.map(h => ({ h, since: kept.get(h.toLowerCase()) || stamp() }));
+  if (DRY) { console.log('Account list kept privately (' + accounts.length + ').'); return true; }
+  const file = path.join(MEMO, 'accounts.json');
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, JSON.stringify({ version: 1, updated: stamp(), accounts }, null, 1) + '\n');
+  console.log('Account list saved privately (' + accounts.length + ').');
+  return true;
+}
+async function setAccounts(names) {
+  const file = MEMO ? path.join(MEMO, 'accounts.json') : '';
+  const before = file ? await readJson(file, { accounts: [] }) : { accounts: [] };
+  const since = new Map((Array.isArray(before.accounts) ? before.accounts : []).filter(a => a && a.h).map(a => [String(a.h).toLowerCase(), a.since]));
+  return writeAccountList(names, since);
+}
+/* A public copy (v1/accounts.json) is never part of the API. Removing one marks the tree changed so the
+   next publish of the api branch leaves it out. */
+async function dropPublicAccounts() {
+  const file = path.join(OUT, 'v1', 'accounts.json');
+  try { await readFile(file); }
+  catch { return; }
+  if (DRY) { console.log('The public account list would be removed.'); return; }
+  await rm(file, { force: true });
+  await mkdir(OUT, { recursive: true });
   await writeFile(path.join(OUT, '.changed'), stamp() + '\n');
+  console.log('The public account list is removed.');
+}
+/* The latest closed issue titled "account" from the owner, when the private list does not exist yet
+   (an issue already closed before this list moved into the memo). */
+async function latestAccountIssue() {
+  if (!REPO || !OWNER || !process.env.GITHUB_TOKEN) return null;
+  const list = await gh('GET', `/repos/${REPO}/issues?state=closed&creator=${encodeURIComponent(OWNER)}&per_page=30`);
+  const found = list.filter(i => !i.pull_request && i.user && i.user.login === OWNER && /^\s*account\b/i.test(i.title || ''));
+  found.sort((a, b) => Date.parse(b.closed_at || b.updated_at || 0) - Date.parse(a.closed_at || a.updated_at || 0));
+  return found[0] || null;
+}
+/* Makes sure the private list exists, without printing a name. An older public file is moved across and
+   then removed. If there is neither, the owner's latest closed account issue is used. */
+async function ensureAccountList() {
+  let have = false;
+  if (MEMO) {
+    try { await readFile(path.join(MEMO, 'accounts.json')); have = true; }
+    catch { /* not saved yet */ }
+  }
+  if (MEMO && !have) {
+    const pub = await readJson(path.join(OUT, 'v1', 'accounts.json'), null);
+    const fromPub = [];
+    const since = new Map();
+    (pub && Array.isArray(pub.accounts) ? pub.accounts : []).forEach(a => {
+      const h = String((a && a.h) || '');
+      if (!NAME.test(h) || fromPub.some(n => n.toLowerCase() === h.toLowerCase())) return;
+      fromPub.push(h);
+      if (a.since) since.set(h.toLowerCase(), a.since);
+    });
+    if (fromPub.length) {
+      await writeAccountList(fromPub.slice(0, MAX_ACCOUNTS), since);
+      console.log('The account list was moved out of the public files.');
+    } else {
+      try {
+        const issue = await latestAccountIssue();
+        if (issue) {
+          await writeAccountList(accountsFrom(issue.body), new Map());
+          console.log('The account list was taken from a past account issue and saved privately.');
+        }
+      } catch (e) {
+        console.log('A past account issue could not be read. The account list was not changed.');
+      }
+    }
+  }
+  await dropPublicAccounts();
 }
 
 async function main() {
   const { genres } = JSON.parse(await readFile(path.join(HERE, 'words.json'), 'utf8'));
+  /* Values of --out and --memo are not part of a list given by hand. */
+  const tail = from => {
+    const out = [];
+    for (let i = from; i < args.length; i++) {
+      if (args[i].startsWith('--')) { if (args[i] === '--out' || args[i] === '--memo') i++; continue; }
+      out.push(args[i]);
+    }
+    return out.join('\n');
+  };
   const byHand = args.indexOf('--urls');
   let jobs;
   const byHandAccounts = args.indexOf('--accounts');
-  if (byHandAccounts >= 0) jobs = [{ number: 0, title: 'account', body: args.slice(byHandAccounts + 1).filter(a => !a.startsWith('--')).join('\n') }];
-  else if (byHand >= 0) jobs = [{ number: 0, body: args.slice(byHand + 1).filter(a => !a.startsWith('--')).join('\n') }];
-  else {
-    if (!REPO || !OWNER || !process.env.GITHUB_TOKEN) { console.log('Not in the workflow and no --urls given: nothing to do.'); return; }
-    jobs = await openIssues();
-  }
+  if (byHandAccounts >= 0) jobs = [{ number: 0, title: 'account', body: tail(byHandAccounts + 1) }];
+  else if (byHand >= 0) jobs = [{ number: 0, body: tail(byHand + 1) }];
+  else if (!REPO || !OWNER || !process.env.GITHUB_TOKEN) {
+    console.log('Not in the workflow and no --urls given: nothing to add.');
+    jobs = [];
+  } else jobs = await openIssues();
   const added = {};
   for (const job of jobs) {
     /* A request that came as an issue is counted for its sender; too many, and none is taken for a while. */
@@ -152,11 +229,13 @@ async function main() {
     }
     if (/^\s*account\b/i.test(job.title || '')) {
       const names = accountsFrom(job.body);
-      await setAccounts(names);
-      const note = names.length
-        ? `The News page may play the replies to: @${names.join(', @')}. Their posts and the replies under them are read from the next run (every half hour), through the same filters as everything else (nothing cruel, nothing against a person, no slander; for an account that is not a paper also nothing of politics or of groups of people), and one account gives a few posts, not its whole timeline.`
+      const saved = await setAccounts(names);
+      const note = !saved
+        ? 'The account list was not saved: the private memo is not available. Nothing was published.'
+        : names.length
+        ? `The News page may play the replies to ${names.length} account${names.length === 1 ? '' : 's'} from this issue. Their posts and the replies under them are read from the next run (every half hour), through the same filters as everything else (nothing cruel, nothing against a person, no slander; for an account that is not a paper also nothing of politics or of groups of people), and one account gives a few posts, not its whole timeline. The names are kept privately and are not written here.`
         : 'No account: the News page plays no replies.';
-      console.log('#' + job.number + ' ' + note);
+      console.log('#' + job.number + ' account list updated (' + names.length + ')');
       if (job.number && !DRY) {
         await gh('POST', `/repos/${REPO}/issues/${job.number}/comments`, { body: note });
         await gh('PATCH', `/repos/${REPO}/issues/${job.number}`, { state: 'closed' });
@@ -174,6 +253,7 @@ async function main() {
       await gh('PATCH', `/repos/${REPO}/issues/${job.number}`, { state: 'closed' });
     }
   }
+  await ensureAccountList();
   await saveRequests();
   if (DRY || !Object.keys(added).length) return;
   const outs = [];

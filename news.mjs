@@ -3,8 +3,9 @@
 
    The News page (githitosh.github.io/news-shorts/) plays the news accounts' own posts as headlines. It
    plays replies only for an account its reader added in Settings: the page sends that list here as an
-   issue titled "account" (ingest.mjs), which writes v1/accounts.json. Replies are read only for those
-   accounts' posts; with no account asked for, no reply is searched or read at all. Searching X when
+   issue titled "account" (ingest.mjs), which writes accounts.json in the private memo (--memo or
+   XAPI_MEMO_DIR), never a public file. Replies are read only for those accounts' posts; with no account
+   asked for, no reply is searched or read at all. Names from that list are not printed. Searching X when
    Update is pressed takes too long, so this program does it every half hour and writes one file,
    v1/news-<lang>.json, that the page only reads.
 
@@ -36,7 +37,7 @@
      5. The news accounts' own latest posts are kept too, as headlines (up to 900 for 36 hours). The
         page plays them when replies are switched off, and for news that gets no replies.
    Settings are in config.json under "news"; "on": false turns it off. Node 20 or newer; no packages. */
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { stamp, readJson, charLen, cleanText, genreOf, readEmbed, readFixupX } from './rules.mjs';
@@ -75,6 +76,9 @@ const CONF = {
   maxRests: num('maxRests', 6),   // rests one way in may take in a run: refusals that come and go must not make a run last for hours
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1',
+  /* The private folder the account list is read from (accounts.json, written by ingest.mjs). Empty: no
+     account is asked for. A list left among the public files is not read, and is taken away. */
+  memo: opt('memo', process.env.XAPI_MEMO_DIR || '') ? path.resolve(opt('memo', process.env.XAPI_MEMO_DIR || '')) : '',
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const shuffle = list => list.map(x => [Math.random(), x]).sort((a, b) => a[0] - b[0]).map(x => x[1]);
@@ -461,9 +465,19 @@ async function build(lang) {
   const oldNews = (before.news && typeof before.news === 'object') ? before.news : {};
   const oldItems = (Array.isArray(before.items) ? before.items : []).filter(x => x && x.id && x.h && x.t && x.n && oldNews[x.n]);
   const tally = (before.accounts && typeof before.accounts === 'object') ? before.accounts : {};
-  /* The accounts asked for (v1/accounts.json, written by ingest.mjs from the owner's "account" issue). */
-  const askedFile = await readJson(path.join(CONF.out, 'v1', 'accounts.json'), {});
+  /* The accounts asked for (accounts.json in the private memo, written by ingest.mjs). Not the public files. */
+  const askedFile = CONF.memo ? await readJson(path.join(CONF.memo, 'accounts.json'), {}) : {};
   const askedList = [...new Set((Array.isArray(askedFile.accounts) ? askedFile.accounts : []).map(a => String((a && a.h) || '')).filter(h => /^[A-Za-z0-9_]{1,15}$/.test(h)))].slice(0, 8);
+  const publicList = path.join(CONF.out, 'v1', 'accounts.json');
+  if (!CONF.dry) {
+    let wasPublic = false;
+    try { await readFile(publicList); wasPublic = true; } catch (e) {}
+    if (wasPublic) {
+      await rm(publicList, { force: true });
+      await writeFile(path.join(CONF.out, '.changed'), stamp());
+      console.log('The public account list is removed.');
+    }
+  }
   const asked = new Set(askedList.map(h => h.toLowerCase()));
   const isAsked = a => !!a && asked.has(String(a[0]).toLowerCase());
   const base = (ACCOUNTS[lang] || []).concat(HEAD_ONLY[lang] || []);
@@ -476,8 +490,11 @@ async function build(lang) {
     const known = base.find(a => a[0].toLowerCase() === h.toLowerCase());
     accounts.push(known ? [known[0], known[1], known[2], 3] : [h, oldNames.get(h.toLowerCase()) || '@' + h, '', 3]);
   });
-  if (askedList.length) console.log(`  ${lang}: replies are read for @${askedList.join(', @')}`);
+  if (!CONF.memo) console.log(`  ${lang}: no private folder for the account list, so no reply is read (headlines only)`);
+  else if (askedList.length) console.log(`  ${lang}: replies are read for ${askedList.length} account${askedList.length === 1 ? '' : 's'} from the private list`);
   else console.log(`  ${lang}: no account is asked for, so no reply is read (headlines only)`);
+  /* A name from the private list is not printed. News accounts that are not on that list still are. */
+  const quiet = h => asked.has(String(h || '').toLowerCase());
   const byHandle = new Map(accounts.map(a => [a[0].toLowerCase(), a]));
   const have = new Set(oldItems.map(x => x.id));
   const texts = new Set(oldItems.map(x => squash(x.t).slice(0, 40)));
@@ -519,7 +536,7 @@ async function build(lang) {
     if (own && shown) a[1] = String(shown.author.name).slice(0, 30);
     /* An account asked for that speaks of being under age is read for nothing. */
     const minor = own && !!shown && MINOR_BIO.test(String(shown.author.description || '') + ' ' + String(shown.author.name || ''));
-    if (minor) console.log(`  @${handle}: asked for, but its profile speaks of being under age: nothing is taken`);
+    if (minor) console.log('  an asked account: its profile speaks of being under age: nothing is taken');
     list.forEach(st => {
       const id = statusId(st);
       if (!id || handleOf(st).toLowerCase() !== handle.toLowerCase() || parentOf(st).id) return;
@@ -558,7 +575,8 @@ async function build(lang) {
     count[way === 'timeline' ? 'byTimeline' : 'bySearch'] = (count[way === 'timeline' ? 'byTimeline' : 'bySearch'] || 0) + 1;
     readAt[job.handle.toLowerCase()] = stamp();
     const got = takePosts(job.handle, a, list);
-    console.log(`  ${lang} headlines @${job.handle} (${way}): ${list.length} posts, ${got} new`);
+    const who = quiet(job.handle) ? 'an asked account' : '@' + job.handle;
+    console.log(`  ${lang} headlines ${who} (${way}): ${list.length} posts, ${got} new`);
     await sleep(way === 'search' ? CONF.pause : 1500);
   }
   if (queue.length && !CONF.noSearch) console.log(`  headlines: time is up with ${queue.length} accounts not read (they come first next time)`);
@@ -676,7 +694,7 @@ async function build(lang) {
       cands.push({ id, h, t: text, n: parent.id, at: whenOf(st), s: replyScore(text, st), account: p.a });
       got++;
     });
-    console.log(`  ${lang} @${handle}: ${list.length} replies, ${got} may play (${cands.length} so far)`);
+    console.log(`  ${lang} an asked account: ${list.length} replies, ${got} may play (${cands.length} so far)`);
     await sleep(CONF.pause);
   }
   count.candidates = cands.length;
@@ -728,11 +746,16 @@ async function build(lang) {
   const usedNews = {};
   items.forEach(x => { usedNews[x.n] = allNews[x.n]; });
   const genres = {};
-  const sources = {};
-  items.forEach(x => { const a = usedNews[x.n]; genres[a.g || 'other'] = (genres[a.g || 'other'] || 0) + 1; sources[a.n] = (sources[a.n] || 0) + 1; });
+  items.forEach(x => { const a = usedNews[x.n]; genres[a.g || 'other'] = (genres[a.g || 'other'] || 0) + 1; });
   console.log(`  ${lang}: ${count.searches} searches gave ${count.replies} replies and ${count.conversations} conversations gave ${count.convReplies}; ${count.candidates} may play; ${count.read} news posts read (${failed.size} could not be read), ${count.news} may play; ${count.items} new replies. The file holds ${items.length} replies to ${Object.keys(usedNews).length} pieces of news.`);
   console.log('  by genre: ' + JSON.stringify(genres));
-  console.log('  by source: ' + JSON.stringify(sources));
+  const sourceLog = {};
+  items.forEach(x => {
+    const a = usedNews[x.n];
+    const key = a && quiet(a.h) ? 'an asked account' : (a ? a.n : '');
+    if (key) sourceLog[key] = (sourceLog[key] || 0) + 1;
+  });
+  console.log('  by source: ' + JSON.stringify(sourceLog));
   /* The headlines: this run's and the earlier ones that are still young, newest first, no line twice. */
   const headFresh = x => Date.now() - Date.parse(x.found || 0) < CONF.headHours * 3600e3;
   const headSeen = new Set();

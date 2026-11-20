@@ -1,7 +1,8 @@
 # githito.xapi: adds a talk that the owner sent by hand, or sets the accounts whose replies the News page may play.
 # An issue titled "talk" holds the links: the first is the post, the ones after it are replies.
 # Each link is read through X's official embed API (no key, no charge). Only the owner's issues are read.
-# An issue titled "account" lists X accounts, one on each line; it replaces the list in v1/accounts.json.
+# An issue titled "account" lists X accounts, one on each line; it replaces the list in the private memo
+# (accounts.json beside humor-memo-ja.json). The list is not published and the names are not printed.
 name: Ingest
 on:
   issues:
@@ -27,13 +28,44 @@ jobs:
         run: |
           mkdir -p public
           if git fetch --depth=1 origin api 2>/dev/null; then git archive FETCH_HEAD | tar -x -C public; fi
+      - name: The memo (a private repository)
+        continue-on-error: true
+        env:
+          MEMO_TOKEN: ${{ secrets.MEMO_TOKEN }}
+          MEMO_REPO: ${{ vars.MEMO_REPO || format('{0}/githito.memo', github.repository_owner) }}
+        run: |
+          if [ -z "$MEMO_TOKEN" ]; then echo "No MEMO_TOKEN secret: the memo is not kept."; exit 0; fi
+          if git clone -q --depth=1 "https://x-access-token:${MEMO_TOKEN}@github.com/${MEMO_REPO}.git" "$RUNNER_TEMP/memo"; then
+            git -C "$RUNNER_TEMP/memo" remote set-url origin "https://github.com/${MEMO_REPO}.git"
+            echo "XAPI_MEMO_DIR=$RUNNER_TEMP/memo" >> "$GITHUB_ENV"
+            echo "The memo is read from the private repository."
+          else
+            echo "The private repository could not be read: the memo is not kept in this run."
+          fi
       - name: Read the links and add the talks
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node ingest.mjs --out public
+      - name: Save the memo (the private repository)
+        if: ${{ env.XAPI_MEMO_DIR != '' }}
+        continue-on-error: true
+        env:
+          MEMO_TOKEN: ${{ secrets.MEMO_TOKEN }}
+          MEMO_REPO: ${{ vars.MEMO_REPO || format('{0}/githito.memo', github.repository_owner) }}
+        run: |
+          cd "$XAPI_MEMO_DIR"
+          git config user.name "githito.xapi collector"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "The memo did not change."; exit 0; fi
+          git commit -q -m "Memo $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q "https://x-access-token:${MEMO_TOKEN}@github.com/${MEMO_REPO}.git" HEAD:main
+          echo "The memo is saved in the private repository."
       - name: Publish (branch api, one commit, no history kept)
         run: |
           cd public
+          # The account list is private. Never publish it, even if an older run left the file here.
+          if [ -f v1/accounts.json ]; then rm -f v1/accounts.json; touch .changed; fi
           if [ ! -f .changed ]; then echo "Nothing new to publish."; exit 0; fi
           rm -f .changed
           rm -rf .git

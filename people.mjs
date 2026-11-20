@@ -83,44 +83,32 @@ function said(st, news, lang) {
   return { id: String(st.id), h, n: String(a.name || h).slice(0, 40), f: followers, l: likes, t, on: String(news.id), g: news.g || '', at: st.created_at ? new Date(st.created_at).toISOString().replace(/\.\d+Z$/, 'Z') : '', found: stamp() };
 }
 
-/* Well-known people's own accounts: [handle, a part of the name the account shows (an account is used only
-   when its name has it, so that a handle that has changed hands is not), genre]. Their own posts (not their
-   replies or reposts) that many people liked are their words on News. Papers, broadcasters and companies are
-   not here. FxTwitter answers some of these only now and then: an account that does not answer is asked
-   again in a later run. */
-const FAMOUS = {
-  ja: [['ariyoshihiroiki', '有吉', 'entertainment'], ['YoshikiOfficial', 'Yoshiki', 'entertainment'], ['faridyu', 'ダルビッシュ', 'sports'], ['ochyai', '落合', 'science'],
-    ['nishinoakihiro', '西野', 'entertainment'], ['Ayase_0404', 'Ayase', 'entertainment'], ['ayu_19980408', 'ayumi', 'entertainment'], ['kskgroup2017', 'Honda', 'sports'],
-    ['hirox246', 'ひろゆき', 'other'], ['yousuck2020', '前澤', 'other'], ['takapon_jp', '堀江', 'other'], ['345__chan', '指原', 'entertainment'],
-    ['tsubasa_0627', '本田翼', 'entertainment'], ['utadahikaru', '宇多田', 'entertainment'], ['GACKT', 'GACKT', 'entertainment'], ['YutoNagatomo5', '長友', 'sports'],
-    ['masason', '孫', 'other'], ['narita_yusuke', '成田', 'other'], ['hajimesyacho', 'はじめ', 'entertainment'], ['hikakin', 'HIKAKIN', 'entertainment'],
-    ['shoko55mmts', '中川', 'entertainment'], ['pamyurin', 'きゃりー', 'entertainment'], ['hachi_08', '米津', 'entertainment'], ['ado1024imokenp', 'Ado', 'entertainment'],
-    ['ikura_lilas', '幾田', 'entertainment'], ['aimyonGtter', 'あいみょん', 'entertainment'], ['Taka_tweet', 'Taka', 'entertainment'], ['daikitsuneta', '常田', 'entertainment'],
-    ['atsuhiko_nakata', '中田', 'entertainment'], ['0220nicole', '藤田', 'entertainment'], ['michopa1030', 'みちょぱ', 'entertainment'], ['sosotakei', '武井', 'sports'],
-    ['daijapan', '為末', 'sports'], ['tonji5', '槙野', 'sports'], ['naomiosaka', 'Naomi', 'sports'], ['shinkaimakoto', '新海', 'entertainment'],
-    ['Tetsuya_Komuro', '小室', 'entertainment'], ['kenichiromogi', '茂木', 'science'], ['tabbata', '田端', 'other'], ['matsu_bouzu', '松本', 'entertainment']],
-  en: [['elonmusk', 'Elon', 'science'], ['BillGates', 'Bill Gates', 'science'], ['Cristiano', 'Cristiano', 'sports'], ['neymarjr', 'Neymar', 'sports'],
-    ['KingJames', 'LeBron', 'sports'], ['shakira', 'Shakira', 'entertainment'], ['TheRock', 'Dwayne', 'entertainment'], ['Oprah', 'Oprah', 'entertainment'],
-    ['jimmyfallon', 'Jimmy', 'entertainment'], ['MrBeast', 'MrBeast', 'entertainment'], ['JeffBezos', 'Jeff', 'science'], ['ShawnMendes', 'Shawn', 'entertainment'],
-    ['Ninja', 'Ninja', 'entertainment'], ['TheWeeknd', 'Weeknd', 'entertainment'], ['ConanOBrien', 'Conan', 'entertainment'], ['mkbhd', 'Marques', 'science'],
-    ['Astro_Jessica', 'Jessica', 'space'], ['Cmdr_Hadfield', 'Chris', 'space'], ['Drake', 'Drizzy', 'entertainment'], ['edsheeran', 'Ed Sheeran', 'entertainment'],
-    ['taylorswift13', 'Taylor', 'entertainment'], ['justinbieber', 'Justin', 'entertainment'], ['rihanna', 'Rihanna', 'entertainment'], ['KimKardashian', 'Kim', 'entertainment'],
-    ['StephenCurry30', 'Stephen', 'sports'], ['ladygaga', 'Gaga', 'entertainment'], ['katyperry', 'KATY', 'entertainment'], ['ArianaGrande', 'Ariana', 'entertainment'],
-    ['selenagomez', 'Selena', 'entertainment'], ['tim_cook', 'Tim Cook', 'science'], ['sundarpichai', 'Sundar', 'science'], ['richardbranson', 'Richard', 'other'],
-    ['neiltyson', 'Neil', 'science'], ['BrunoMars', 'Bruno', 'entertainment'], ['Harry_Styles', 'Harry', 'entertainment'], ['VancityReynolds', 'Ryan', 'entertainment'],
-    ['LewisHamilton', 'Lewis', 'sports'], ['serenawilliams', 'Serena', 'sports'], ['usainbolt', 'Usain', 'sports'], ['sama', 'Sam Altman', 'science']],
-};
+/* Well-known people's own accounts are kept in the PRIVATE memo (news-famous.json in the folder XAPI_MEMO_DIR
+   or --memo names), never in this public repository: { ja: [{ h, k, g }], en: [...] }. k: a part of the name
+   the account must show (an account is used only when its name has it, so that a handle that is someone
+   else's is not; without k the account must have 200,000 followers or more). g: the genre. News only:
+   Reply News does not read it. Without the memo (the MEMO_TOKEN secret), nobody's own posts are read. */
+const MEMO_DIR = opt('memo', process.env.XAPI_MEMO_DIR || '');
+async function famousList() {
+  if (!MEMO_DIR) return { ja: [], en: [] };
+  const d = await readJson(path.join(path.resolve(MEMO_DIR), 'news-famous.json'), {});
+  const list = l => (Array.isArray(d[l]) ? d[l] : []).filter(e => e && /^[A-Za-z0-9_]{1,15}$/.test(String(e.h || ''))).map(e => [String(e.h), String(e.k || ''), String(e.g || 'entertainment')]);
+  return { ja: list('ja'), en: list('en') };
+}
+let FAMOUS = { ja: [], en: [] };
 async function ownPosts(handle) {
   const res = await fetch('https://api.fxtwitter.com/2/profile/' + handle + '/statuses?count=40', { headers: { 'user-agent': 'githito.xapi collector' }, signal: AbortSignal.timeout(25000) });
   const d = await res.json().catch(() => null);
   if (res.status !== 200 || !d || (d.code && d.code !== 200)) throw new Error('did not answer (' + res.status + ')');
   return Array.isArray(d.results) ? d.results : [];
 }
-/* Their own posts of the last two days that many liked (one in five thousand followers, a hundred at least):
-   the best two of each person a run. */
-async function famous(lang, people, have, readAt, minutes) {
+/* Their own posts of the last three days that many liked (one in twenty thousand followers, a hundred at
+   least): the best two of each person a run. */
+async function famous(lang, people, have, readAt, notThem, minutes) {
   const ok = lang === 'en' ? wordsOkEn : wordsOk;
-  const list = (FAMOUS[lang] || []).slice().sort((x, y) => (Date.parse(readAt[x[0]] || 0) || 0) - (Date.parse(readAt[y[0]] || 0) || 0));
+  /* Those read longest ago first; an account found not to be the person waits a week. */
+  const list = (FAMOUS[lang] || []).filter(([h]) => !notThem[h] || Date.now() - Date.parse(notThem[h]) > 7 * 24 * 3600e3)
+    .sort((x, y) => (Date.parse(readAt[x[0]] || 0) || 0) - (Date.parse(readAt[y[0]] || 0) || 0));
   const deadline = Date.now() + minutes * 60e3;
   let asked = 0, answered = 0, got = 0;
   for (const [h, key, g] of list) {
@@ -131,14 +119,16 @@ async function famous(lang, people, have, readAt, minutes) {
     readAt[h] = stamp();
     const own = posts.filter(st => st && st.author && String(st.author.screen_name).toLowerCase() === h.toLowerCase() && !st.reposted_by && !(st.replying_to && (st.replying_to.status || st.replying_to.screen_name)));
     const a = own[0] && own[0].author;
-    if (!a || !String(a.name || '').toLowerCase().includes(key.toLowerCase()) || a.protected) { await sleep(1000); continue; }
+    if (!a) { await sleep(1000); continue; }
+    const them = key ? String(a.name || '').toLowerCase().includes(key.toLowerCase()) && (Number(a.followers) || 0) >= 50000 : (Number(a.followers) || 0) >= 200000;
+    if (!them || a.protected) { notThem[h] = stamp(); await sleep(1000); continue; }
     answered++;
-    const least = Math.max(100, Math.round((Number(a.followers) || 0) / 5000));
+    const least = Math.max(100, Math.round((Number(a.followers) || 0) / 20000));
     const found = own.map(st => {
       const t = tidy(st.text);
       const likes = Number(st.likes) || 0;
       const at = st.created_at ? new Date(st.created_at).toISOString().replace(/\.\d+Z$/, 'Z') : '';
-      if (likes < least || Date.now() - Date.parse(at || 0) > 48 * 3600e3 || have.has(String(st.id)) || st.possibly_sensitive) return null;
+      if (likes < least || Date.now() - Date.parse(at || 0) > 72 * 3600e3 || have.has(String(st.id)) || st.possibly_sensitive) return null;
       if (lang === 'en' ? (t.length < 20 || t.length > 200 || /[ぁ-ヿ一-鿿]/.test(t)) : (len(t) < 8 || len(t) > 100 || (t.match(/[ぁ-ヿ一-鿿]/g) || []).length < 4)) return null;
       if (!ok(t)) return null;
       return { id: String(st.id), h: a.screen_name, n: String(a.name).slice(0, 40), f: Number(a.followers) || 0, l: likes, t, on: '', own: 1, g, at, found: stamp() };
@@ -169,7 +159,8 @@ async function gather(lang, posts, minutes) {
     .sort((a, b) => (Number(b.rc) || 0) - (Number(a.rc) || 0)).slice(0, posts);
   /* Well-known people's own words first, then what people replied under the news. */
   const famousRead = Object.fromEntries(Object.entries(before.famousRead || {}).filter(([, at]) => fresh(at)));
-  let got = await famous(lang, people, have, famousRead, minutes / 2);
+  const notThem = Object.fromEntries(Object.entries(before.notThem || {}).filter(([, at]) => Date.now() - Date.parse(at || 0) < 7 * 24 * 3600e3));
+  let got = await famous(lang, people, have, famousRead, notThem, minutes / 2);
   const deadline = Date.now() + minutes * 60e3;
   let asked = 0, refused = 0;
   for (const x of heads) {
@@ -184,13 +175,15 @@ async function gather(lang, posts, minutes) {
     await sleep(1200);
   }
   people.sort((a, b) => (Date.parse(b.found) || 0) - (Date.parse(a.found) || 0));
-  const out = { version: 1, lang, updated: stamp(), read, famousRead, people: people.slice(0, CONF.keep) };
+  const out = { version: 1, lang, updated: stamp(), read, famousRead, notThem, people: people.slice(0, CONF.keep) };
   await writeFile(file, JSON.stringify(out) + '\n');
   if (got) await writeFile(path.join(CONF.out, '.changed'), stamp() + '\n');
   console.log(`People (${lang}): ${asked} news posts read as conversations (${refused} refused), ${got} new posts kept; the file holds ${out.people.length}.`);
 }
 async function main() {
   await mkdir(path.join(CONF.out, 'v1'), { recursive: true });
+  FAMOUS = await famousList();
+  console.log(MEMO_DIR ? `Well-known people (the private memo): ${FAMOUS.ja.length} Japanese, ${FAMOUS.en.length} English accounts.` : 'No private memo (XAPI_MEMO_DIR): no well-known person\'s own posts are read.');
   await gather('ja', CONF.posts, CONF.minutes);
   await gather('en', Math.ceil(CONF.posts / 3), CONF.minutes / 3);
 }

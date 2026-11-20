@@ -233,6 +233,36 @@ export function keyword(text) {
   /* Nothing outside the quotation marks: a word from inside them. */
   return t === String(text || '') ? 'NEWS' : keyword(String(text || '').replace(/[「」【】]/g, ' '));
 }
+/* What the news is about, for the card's top right corner (a word, not the paper): a name or a thing the
+   headline is about (ドコモ, 田中将大, ポケモンジェット, 天皇陛下), not the card's keyword again. A
+   katakana or Latin name and a kanji word of three letters or more come first, the earlier the better;
+   plain words, numbers and units are not topics. '' when none fits (the page then shows the genre). */
+const PLAIN_TOPIC = /^(?:日本|世界|問題|関係|対応|可能|必要|結果|理由|方針|検討|実施|予定|状況|影響|意向|自身|本人|指摘|政府|国際|協力|招集|発表|決定|開始|公開|情報|話題|注目|人気|今回|今後|最大|最高|最低|速報|特集|全国|最新|一部|以上|以下|年間|前年|昨年|来年|今年|今月|来月|今週|来週|先週|今日|明日|昨日|午前|午後|新業態|新作|新機能|新商品|記者会見|会見)$/;
+export function topicOf(text, kw) {
+  const t = String(text || '').replace(/【[^】]*】/g, ' ').replace(EMOJI, ' ');
+  let segs = [];
+  try { segs = [...new Intl.Segmenter('ja', { granularity: 'word' }).segment(t)].map(x => x.segment); } catch (e) { return ''; }
+  const cls = w => (/^[一-鿿々]+$/.test(w) ? 'k' : /^[゠-ヿ・]+$/.test(w) ? 'a' : /^[A-Za-z]+$/.test(w) ? 'l' : '');
+  /* Neighbouring words of one kind make one name (九州+場所, ポケモン+ジェット). */
+  const comps = [];
+  let cur = '', c0 = '';
+  for (const w of segs) { const c = cls(w); if (c && c === c0) cur += w; else { if (cur) comps.push([cur, c0]); cur = c ? w : ''; c0 = c; } }
+  if (cur) comps.push([cur, c0]);
+  const k = String(kw || '');
+  let best = null;
+  comps.forEach(([w, c], i) => {
+    const n = len(w);
+    if (PLAIN_TOPIC.test(w) || (k && (w.includes(k) || k.includes(w)))) return;
+    let sc = 0;
+    if (c === 'a') sc = n >= 3 && n <= 10 ? 6 : 0;
+    else if (c === 'l') sc = n >= 3 && n <= 12 && !/^(?:Hey|Say|The|And|For|With|New|News|Live|Video)$/i.test(w) ? 5 : 0;
+    else if (c === 'k') sc = n >= 3 && n <= 6 ? 5 : n === 2 ? 2 : 0;
+    if (!sc) return;
+    sc -= i * 0.3;
+    if (!best || sc > best.sc) best = { sc, w };
+  });
+  return best && best.sc >= 2 ? best.w : '';
+}
 /* The line a post adds to its headline, unless it only says the headline again. */
 function extra(t, d) {
   if (!d) return '';
@@ -270,9 +300,24 @@ export function newsCard(x) {
   for (const [how, a, b] of tries) {
     if (!partOk(a, 'what') || !partOk(b, how === 'who' || how === 'paper' ? 'who' : 'what')) continue;
     if (a === b || a.includes(b) && how !== 'who') continue;
-    return { id: String(x.id), h: x.h, n: x.n || '', g: x.g || '', at: x.at || x.found || '', kw: keyword(a) === 'NEWS' && how === 'who' ? keyword(b) : keyword(a), ja: [a, b], how, ...(x.q ? { q: 1 } : {}) };
+    const kw = keyword(a) === 'NEWS' && how === 'who' ? keyword(b) : keyword(a);
+    const tp = topicOf(t, kw);
+    return { id: String(x.id), h: x.h, n: x.n || '', g: x.g || '', at: x.at || x.found || '', kw, ...(tp ? { tp } : {}), ja: [a, b], how, ...(x.q ? { q: 1 } : {}) };
   }
   return null;
+}
+
+/* What a person said about the news (people.mjs): their words on the second beat, their name on the third
+   (speed-read news: what, then who), and in the corner what the news is about. news: the post replied to. */
+export function personCard(p, news) {
+  if (!p || !p.id || !p.t || !p.h) return null;
+  const words = tidyNews(p.t);
+  if (!partOk(words, 'what') || cruel(words) || personal(words) || slander(words) || alcohol(words) || tobacco(words)) return null;
+  /* The name as it is shown, without the emoji, flags and slogans people add to it. */
+  const name = String(p.n || '').replace(EMOJI, '|').split(/[|｜／/@＠（(【\[]|\s{1,}/)[0].trim() || '@' + p.h;
+  const kw = keyword(words);
+  const tp = news ? (topicOf(tidyNews(news.t), kw) || keyword(tidyNews(news.t))) : '';
+  return { id: String(p.id), h: p.h, n: name, g: (news && news.g) || p.g || '', at: p.at || p.found || '', kw, ...(tp ? { tp } : {}), ja: [words, len(name) >= 2 ? name : '@' + p.h], how: 'person', f: p.f || 0, l: p.l || 0 };
 }
 
 /* ---------- Reply News ---------- */

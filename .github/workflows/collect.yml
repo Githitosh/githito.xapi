@@ -152,6 +152,12 @@ jobs:
         env:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node news.mjs --out public ${{ inputs.searches && format('--searches {0}', inputs.searches) || '' }}
+      # What people say about the news (people.mjs): replies with reach (followers, likes) to the most
+      # answered news that is not politics or public safety. News closes each video with three of them.
+      - name: What people say about the news
+        if: ${{ !inputs.only || inputs.only == 'news' }}
+        continue-on-error: true
+        run: node people.mjs --out public
       # The video stock (stock.mjs): the words of every card written and checked (compose.mjs), and the cards
       # dealt into videos of ten, about a hundred kept. The pages read these files only.
       - name: Cards and the video stock

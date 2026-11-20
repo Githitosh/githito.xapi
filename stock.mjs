@@ -14,7 +14,7 @@
      node stock.mjs --out public [--videos 100] [--size 10] */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { newsCard, talkCards, replyCard } from './compose.mjs';
+import { newsCard, talkCards, replyCard, personCard } from './compose.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -27,24 +27,34 @@ const time = x => Date.parse(x && x.at) || 0;
 /* Cards into videos. cards: in the order they should play (the first first). person(card): the accounts
    a card shows (nobody twice in a video); group(card): its genre or kind (at most cap of one in a video;
    the same one is not shown twice in a row). Videos whose cards are all still here are kept. */
-function deal(cards, before, { person, group, cap, tag, max = MAX }) {
+function deal(cards, before, { person, group, cap, tag, max = MAX, tail, version }) {
   const byId = new Map(cards.map(c => [c.id, c]));
-  const kept = (Array.isArray(before) ? before : []).filter(v => v && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(id))).slice(0, max);
+  const known = new Set(byId.keys());
+  if (tail) tail.pool.forEach(c => known.add(c.id));
+  /* A video made by an older version of this program is made again. */
+  const kept = (Array.isArray(before) ? before : []).filter(v => v && Array.isArray(v.c) && v.c.length && (v.v || 1) === (version || 1) && v.c.every(id => known.has(id))).slice(0, max);
   const used = new Set(kept.flatMap(v => v.c));
   /* With the stock full, only cards newer than its oldest video make new videos (older ones would be
      dealt, and dropped again, at every run). */
   const oldest = kept.length >= max ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
   let free = cards.filter(c => !used.has(c.id) && time(c) > oldest);
+  /* tail: cards that close each video (what people said, three in ten), each used once. */
+  const tails = tail ? tail.pool.filter(c => !used.has(c.id)) : [];
   const made = [];
   const stamp = Date.now().toString(36);
-  while (free.length >= SIZE) {
+  for (;;) {
+    const end = [];
+    if (tail) for (const c of tails) { if (end.length >= tail.count) break; if (!end.some(e => person(e)[0] === person(c)[0])) end.push(c); }
+    const size = SIZE - end.length;
+    if (free.length < size) break;
+    end.forEach(c => tails.splice(tails.indexOf(c), 1));
     const v = [];
     const people = new Set();
     const groups = {};
     /* Strict first; then a genre may come more often; then an account may come twice. */
-    for (let pass = 0; pass < 3 && v.length < SIZE; pass++) {
+    for (let pass = 0; pass < 3 && v.length < size; pass++) {
       for (const c of free) {
-        if (v.length >= SIZE) break;
+        if (v.length >= size) break;
         if (v.includes(c)) continue;
         const ps = person(c);
         if (pass < 2 && ps.some(p => people.has(p))) continue;
@@ -64,7 +74,8 @@ function deal(cards, before, { person, group, cap, tag, max = MAX }) {
       const k = left.findIndex(c => group(c) !== last);
       order.push(left.splice(k < 0 ? 0 : k, 1)[0]);
     }
-    made.push({ i: 'v' + stamp + made.length.toString(36), at: order.reduce((m, c) => (time(c) > Date.parse(m || 0) ? c.at : m), ''), ...(tag ? tag(order) : {}), c: order.map(c => c.id) });
+    order.push(...end);
+    made.push({ i: 'v' + stamp + made.length.toString(36), ...(version ? { v: version } : {}), at: order.reduce((m, c) => (time(c) > Date.parse(m || 0) ? c.at : m), ''), ...(tag ? tag(order) : {}), c: order.map(c => c.id) });
   }
   const videos = kept.concat(made).sort((x, y) => (Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0)).slice(0, max);
   const now = new Set(videos.map(v => v.i));
@@ -109,14 +120,22 @@ async function main() {
     cards.push(c);
   }
   cards.sort((x, y) => time(y) - time(x));
+  /* What people said about the news (people.mjs): three cards in ten, at the end of a video, the most
+     liked first. */
+  const pplFile = await readJson(path.join(OUT, 'v1', 'people-ja.json'), {});
+  const headById = new Map(heads.map(x => [String(x.id), x]));
+  const said = (Array.isArray(pplFile.people) ? pplFile.people : []).map(p => personCard(p, headById.get(String(p.on)))).filter(Boolean)
+    .sort((x, y) => (y.l - x.l) || (time(y) - time(x)));
   if (heads.length) {
-    const d = deal(cards.filter(c => !c.q), oldNews.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 3 });
+    const d = deal(cards.filter(c => !c.q), oldNews.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 3, version: 2, tail: { pool: said, count: Math.round(SIZE * 0.3) } });
     const used = new Set(d.videos.flatMap(v => v.c));
     /* The file holds the cards of the videos, and the newest of the rest for readers who choose genres. */
-    const shown = cards.filter(c => used.has(c.id) || c.q).concat(cards.filter(c => !used.has(c.id) && !c.q).slice(0, 400));
+    /* (Every card of what people said is in the file: the page closes a video with those its reader has not seen.) */
+    const shown = cards.filter(c => used.has(c.id) || c.q).concat(said, cards.filter(c => !used.has(c.id) && !c.q).slice(0, 400));
     const file = { version: 1, lang: 'ja', made, size: SIZE, cards: shown, videos: d.videos, replies, asked };
     if (await save('stock-news-ja.json', file)) changed = true;
-    console.log(`News: ${cards.length} cards from ${heads.length} headlines ${JSON.stringify(how)}; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept), ${d.waiting} cards wait for the next video; ${replies.length} replies to asked accounts.`);
+    const withPeople = d.videos.filter(v => v.c.some(id => said.some(c => c.id === id))).length;
+    console.log(`News: ${cards.length} cards from ${heads.length} headlines ${JSON.stringify(how)}; ${said.length} cards of what people said; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept, ${withPeople} end on what people said), ${d.waiting} cards wait for the next video; ${replies.length} replies to asked accounts.`);
   } else console.log('News: no headlines yet.');
 
   /* Reply News: a video is conversations, whole, about ten messages: greetings said with love first, then

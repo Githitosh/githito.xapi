@@ -133,8 +133,8 @@ jobs:
         if: ${{ !inputs.only || inputs.only == 'humor' }}
         run: |
           cd public
-          # The account list is private. Never publish it, even if an older run left the file here.
-          if [ -f v1/accounts.json ]; then rm -f v1/accounts.json; touch .changed; fi
+          # Account lists are private. Never publish them, even if an older run left a file here.
+          if [ -f v1/accounts.json ] || [ -f v1/news-famous.json ] || compgen -G 'v1/humor-memo-*.json' >/dev/null; then rm -f v1/accounts.json v1/news-famous.json v1/humor-memo-*.json; touch .changed; fi
           if [ ! -f .changed ]; then echo "Nothing new to publish."; exit 0; fi
           rm -f .changed
           rm -rf .git
@@ -198,8 +198,8 @@ jobs:
       - name: Publish (branch api, one commit, no history kept)
         run: |
           cd public
-          # The account list is private. Never publish it, even if an older run left the file here.
-          if [ -f v1/accounts.json ]; then rm -f v1/accounts.json; touch .changed; fi
+          # Account lists are private. Never publish them, even if an older run left a file here.
+          if [ -f v1/accounts.json ] || [ -f v1/news-famous.json ] || compgen -G 'v1/humor-memo-*.json' >/dev/null; then rm -f v1/accounts.json v1/news-famous.json v1/humor-memo-*.json; touch .changed; fi
           if [ ! -f .changed ]; then echo "Nothing new to publish."; exit 0; fi
           rm -f .changed
           rm -rf .git

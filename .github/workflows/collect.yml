@@ -78,12 +78,47 @@ jobs:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node collect.mjs --out public
       # The Humor page's stories (loving exchanges; greetings in their hours).
+      # The memo of accounts (humor.mjs: the accounts worth coming back to) is kept in a PRIVATE repository,
+      # never among the public files. It needs two things set once by the owner: a private repository named
+      # githito.memo (or the name in the repository variable MEMO_REPO, "owner/name"), and the secret
+      # MEMO_TOKEN, a fine-grained token that may read and write that repository's contents. Without the
+      # secret this step does nothing and nothing is remembered.
+      - name: The memo (a private repository)
+        if: ${{ !inputs.only || inputs.only == 'humor' }}
+        continue-on-error: true
+        env:
+          MEMO_TOKEN: ${{ secrets.MEMO_TOKEN }}
+          MEMO_REPO: ${{ vars.MEMO_REPO || format('{0}/githito.memo', github.repository_owner) }}
+        run: |
+          if [ -z "$MEMO_TOKEN" ]; then echo "No MEMO_TOKEN secret: the memo is not kept."; exit 0; fi
+          if git clone -q --depth=1 "https://x-access-token:${MEMO_TOKEN}@github.com/${MEMO_REPO}.git" "$RUNNER_TEMP/memo"; then
+            git -C "$RUNNER_TEMP/memo" remote set-url origin "https://github.com/${MEMO_REPO}.git"
+            echo "XAPI_MEMO_DIR=$RUNNER_TEMP/memo" >> "$GITHUB_ENV"
+            echo "The memo is read from the private repository."
+          else
+            echo "The private repository could not be read: the memo is not kept in this run."
+          fi
       - name: Humor stories
         if: ${{ !inputs.only || inputs.only == 'humor' }}
         continue-on-error: true
         env:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node humor.mjs --out public
+      - name: Save the memo (the private repository)
+        if: ${{ env.XAPI_MEMO_DIR != '' && (!inputs.only || inputs.only == 'humor') }}
+        continue-on-error: true
+        env:
+          MEMO_TOKEN: ${{ secrets.MEMO_TOKEN }}
+          MEMO_REPO: ${{ vars.MEMO_REPO || format('{0}/githito.memo', github.repository_owner) }}
+        run: |
+          cd "$XAPI_MEMO_DIR"
+          git config user.name "githito.xapi collector"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "The memo did not change."; exit 0; fi
+          git commit -q -m "Memo $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q "https://x-access-token:${MEMO_TOKEN}@github.com/${MEMO_REPO}.git" HEAD:main
+          echo "The memo is saved in the private repository."
       - name: Publish the humor stories
         if: ${{ !inputs.only || inputs.only == 'humor' }}
         run: |

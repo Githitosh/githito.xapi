@@ -34,7 +34,7 @@
         writer through FxTwitter's profile.
    Nobody fills the file: four stories for one person at most, two of them from one run.
    Settings are in config.json under "humor"; "on": false turns it off. Node 20 or newer; no packages. */
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { stamp, readJson, charLen, cleanText, readFixupX } from './rules.mjs';
@@ -63,6 +63,10 @@ const CONF = {
   minutes: num('minutes', 13),   // how long one run may last: a refusal passes in a quarter of an hour, so a run waits it out
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1',
+  /* The folder the memo of accounts is kept in (see "the accounts worth coming back to"). It is a private
+     place, never among the public files: the workflow fills it from a private repository. Empty: nothing
+     is remembered. */
+  memo: opt('memo', process.env.XAPI_MEMO_DIR || '') ? path.resolve(opt('memo', process.env.XAPI_MEMO_DIR || '')) : '',
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const shuffle = list => list.map(x => [Math.random(), x]).sort((a, b) => a[0] - b[0]).map(x => x[1]);
@@ -346,7 +350,9 @@ function humorPlay(stories) {
 }
 
 /* ---------- the accounts worth coming back to ---------- */
-/* Those whose loving replies made the best stories are remembered, in v1/humor-memo-<lang>.json. At every
+/* Those whose loving replies made the best stories are remembered, in humor-memo-<lang>.json in the memo
+   folder (--memo or XAPI_MEMO_DIR): a private repository, not the public files. Without that folder
+   nothing is remembered, and a memo left among the public files is taken away. At every
    run a number of accounts drawn at random, ten to sixteen, is noted: those who wrote the best replies of
    the run first, then of the file, those not yet noted before those already there. What is kept is the
    account's name, when it was first and last noted, how many times, and its best score: nobody's words.
@@ -417,8 +423,11 @@ async function build(lang) {
   const people = [];
   const meet = handle => { const h = String(handle || ''); const k = h.toLowerCase(); if (!h || known.has(k) || skipped(h)) return; known.add(k); people.push(h); };
   /* The accounts in the memo come first (see above): a number drawn at random, those read longest ago first. */
-  const memoFile = path.join(CONF.out, 'v1', `humor-memo-${lang}.json`);
-  const memo = memoFrom(await readJson(memoFile, {}));
+  const memoFile = CONF.memo ? path.join(CONF.memo, `humor-memo-${lang}.json`) : '';
+  const memo = memoFile ? memoFrom(await readJson(memoFile, {})) : {};
+  /* The memo is not public: one that was written among the public files is taken away. */
+  if (!CONF.dry) await rm(path.join(CONF.out, 'v1', `humor-memo-${lang}.json`), { force: true });
+  if (!memoFile) console.log(`  ${lang}: no private folder for the memo (--memo): no account is remembered`);
   const memoFirst = shuffle(Object.values(memo)).sort((x, y) => (Date.parse(readAt[x.h.toLowerCase()] || 0) || 0) - (Date.parse(readAt[y.h.toLowerCase()] || 0) || 0)).slice(0, drawCount()).map(m => m.h);
   memoFirst.forEach(meet);
   if (memoFirst.length) console.log(`  ${lang}: ${Object.keys(memo).length} accounts in the memo; ${memoFirst.length} of them are read first`);
@@ -569,7 +578,7 @@ async function build(lang) {
   const stories = found.filter(s => !skipped(s.a.handle) && !skipped(s.b.handle)).concat(old.filter(s => fresh(s) && ok(s) && !skipped(s.a.handle) && !skipped(s.b.handle)).map(s => ({ ...s, kind: talkKind(pairText(s)) }))).slice(0, CONF.keep);
   /* The memo: a number of accounts drawn at random is noted, from this run's best replies, then from the
      file's (those not yet in the memo, then any). A run that searched nothing notes nothing. */
-  if (!off) {
+  if (!off && memoFile) {
     const kept = new Set(stories.map(s => s.id));
     const fresh0 = found.filter(s => kept.has(s.id));
     const noted = noteAccounts(memo, [fresh0, stories.filter(s => !memo[String(s.b.handle).toLowerCase()]), stories], drawCount());

@@ -75,9 +75,17 @@
 - 再生する順番はここで乱数で決めます（上の「何を流すかは、ここで決めます」）。ページは朝（4〜11時）は `play.morning`、夜（20〜4時）は `play.night`、それ以外は `play.day` を上から読みます。
 - `config.json` の `humor` で設定します（`"on": false` で止まります）。`source` が `off` でも、こちらは動きます。
 
-### おもしろい恋愛リプライをするアカウントの記録（`humor-memo-ja.json`）
+### おもしろい恋愛リプライをするアカウントの記録（非公開）
 
 良い会話になったリプライを書いたアカウントを、収集のたびに記録します。
+**記録は公開しません。** 別の非公開リポジトリ（`githito.memo`）に `humor-memo-ja.json` として保存し、公開用のファイル（ブランチ `api`）には置きません。
+
+**一度だけ必要な設定（持ち主が GitHub で行います）**
+1. 非公開のリポジトリ `githito.memo` を作る（名前を変える場合は、このリポジトリの変数 `MEMO_REPO` に `持ち主/名前` を入れます）。
+2. そのリポジトリの中身（Contents）を読み書きできるトークン（fine-grained personal access token）を作る。
+3. このリポジトリの Settings → Secrets and variables → Actions に、そのトークンを `MEMO_TOKEN` という名前で登録する。
+
+`MEMO_TOKEN` がないあいだは何も記録しません（収集そのものはふだんどおり動きます）。トークンの期限が切れたときも同じです。
 
 - **毎回、乱数で決めた数（10〜16件）を記録**します。その回に見つけた会話のうち点数の高いリプライを書いた人から順に、
   足りなければファイルにある会話から（まだ記録していない人を先に）選びます。
@@ -165,7 +173,6 @@
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/humor-ja.json` | ユーモアページ用：恋愛のやりとり（最大600組） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/stats.json` | 取り込み量：1時間ごとの新しい会話・見出しの数（7日分）と、最後の実行の数字 |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/intake.svg` | 取り込み量のグラフ（直近48時間の画像） |
-| `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/humor-memo-ja.json` | おもしろい恋愛リプライをするアカウントの記録（アカウント名・回数・点数。本文なし、最長30日、最大300件） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/index.json` | 最終更新の時刻と、ジャンルごとの件数 |
 
 ジャンル：`space` `politics` `science` `culture` `local` `entertainment` `safety` `sports` `food`

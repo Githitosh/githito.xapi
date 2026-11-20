@@ -15,7 +15,7 @@
      node people.mjs --out public [--minutes 4] [--posts 100] [--followers 300] [--likes 5] */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { cruel, personal, slander, alcohol, tobacco } from './filters.mjs';
+import { cruel, personal, slander, alcohol, tobacco, politicalTarget, politicalAttack } from './filters.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -52,8 +52,9 @@ const AD = /PR|プロモーション|広告|宣伝|案件|フォローして|RT�
 const THANKS = /記事[をの]?ありがと|取材[をの]?ありがと|インタビュー記事|ありがとうございます/;
 /* The words themselves: no advertisement, quarrel or politics, nothing the other filters leave out. */
 /* (Quarrels are not left out: what people argue about is people's words too. Slander still is.) */
-const wordsOkEn = t => !(AD_EN.test(t) || POLITICS_EN.test(t) || cruel(t) || personal(t) || slander(t) || alcohol(t) || tobacco(t) || /^[^A-Za-z]*$/.test(t));
-const wordsOk = t => !(AD.test(t) || THANKS.test(t) || POLITICS.test(t) || cruel(t) || personal(t) || slander(t) || alcohol(t) || tobacco(t) || /^[^ぁ-ヿ一-鿿]*$/.test(t));
+const wordsOkEn = t => !(politicalTarget(t) || AD_EN.test(t) || POLITICS_EN.test(t) || cruel(t) || personal(t) || slander(t) || alcohol(t) || tobacco(t) || /^[^A-Za-z]*$/.test(t));
+/* (A reply about a politician, a party, the government, a paper or a broadcaster is left out: politicalTarget.) */
+const wordsOk = t => !(politicalTarget(t) || AD.test(t) || THANKS.test(t) || POLITICS.test(t) || cruel(t) || personal(t) || slander(t) || alcohol(t) || tobacco(t) || /^[^ぁ-ヿ一-鿿]*$/.test(t));
 const tidy = t => String(t || '').replace(/^(?:\s*[@＠][A-Za-z0-9_]+)+/, '').replace(/https?:\/\/\S+/g, ' ').replace(/[#＃][^\s#＃]+/g, ' ').replace(/[─-▟]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 async function conversation(id) {
@@ -107,7 +108,7 @@ async function ownPosts(handle) {
 /* Well-known people's own words are not held to the topic filters (politics, advertisement): what they post
    is said in public under their own name. Only what is never shown is left out: cruel, personal, slander,
    and alcohol and smoking (the pages are read by the young too). */
-const famousOk = t => !(cruel(t) || personal(t) || slander(t) || alcohol(t) || tobacco(t));
+const famousOk = t => !(cruel(t) || personal(t) || slander(t) || alcohol(t) || tobacco(t) || politicalAttack(t));
 async function famous(lang, people, have, readAt, notThem, minutes) {
   const ok = famousOk;
   /* Those read longest ago first; an account found not to be the person waits a week. */

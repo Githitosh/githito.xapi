@@ -17,7 +17,7 @@
    reader asked for, the reply alone (replyCard).
 
    Nothing here asks anything of anybody: it reads the files the collectors wrote. */
-import { cruel, personal, slander, alcohol, tobacco, adultNews } from './filters.mjs';
+import { cruel, personal, slander, alcohol, tobacco, adultNews, politicalTarget, politicalAttack } from './filters.mjs';
 
 /* ---------- who the news is about ---------- */
 /* A card of speed-read news says what happened on its second beat and who did it, said it or showed it on
@@ -343,6 +343,8 @@ export function personCard(p, news) {
   if (!p || !p.id || !p.t || !p.h) return null;
   const words = tidyNews(String(p.t).replace(/^[＞>]+\s*/, ''));
   if (!partOk(words, 'what') || cruel(words) || personal(words) || slander(words) || alcohol(words) || tobacco(words)) return null;
+  /* About a politician, a party, the government, a paper: never for a reply; for one's own post, not when it runs them down. */
+  if (p.own ? politicalAttack(words) : politicalTarget(words)) return null;
   const kw = keyword(words);
   const tp = news ? (topicOf(tidyNews(news.t), kw) || '') : '';
   const cut = cutJa(words);
@@ -362,7 +364,7 @@ export function personCard(p, news) {
 export function personCardEn(p, news) {
   if (!p || !p.id || !p.t || !p.h) return null;
   const words = String(p.t).replace(/https?:\/\/\S+/g, ' ').replace(EMOJI, ' ').replace(/\s+/g, ' ').trim();
-  if (words.length < 20 || words.length > 160 || cruel(words) || personal(words) || alcohol(words) || tobacco(words)) return null;
+  if (words.length < 20 || words.length > 160 || cruel(words) || personal(words) || alcohol(words) || tobacco(words) || (p.own ? politicalAttack(words) : politicalTarget(words))) return null;
   const kw = keywordEn(words);
   const tp = news ? keywordEn(String(news.t), kw) : '';
   const c = cutEn2(words);

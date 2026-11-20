@@ -4,8 +4,9 @@
    were while their cards are still in the files. About a hundred videos are kept, the newest first.
 
      v1/stock-news-ja.json   News: cards { id, h, n, g, at, kw, ja: [what, who], how, q? }
-     v1/stock-humor-ja.json  Reply News: cards { id, k, at, s, a, b, kw, ja: [post, reply] }
-     both: videos [{ i, at, c: [card ids], m? }], replies (to the accounts readers asked for), asked
+     v1/stock-humor-ja.json  Reply News: talks { i, k, at, s, gl, m: [{ i, h, to, ja: [part, whole] }] }
+                             (a talk is a conversation; a message is a card)
+     both: videos [{ i, at, c: [card or talk ids], m? }], replies (to the accounts readers asked for), asked
 
    The pages read these files and nothing else: they make no words of their own. A reader's page plays the
    newest video it has not played, or picks among the cards when the reader chose genres or words.
@@ -13,7 +14,7 @@
      node stock.mjs --out public [--videos 100] [--size 10] */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { newsCard, humorCard, replyCard } from './compose.mjs';
+import { newsCard, talkCards, replyCard } from './compose.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -118,19 +119,55 @@ async function main() {
     console.log(`News: ${cards.length} cards from ${heads.length} headlines ${JSON.stringify(how)}; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept), ${d.waiting} cards wait for the next video; ${replies.length} replies to asked accounts.`);
   } else console.log('News: no headlines yet.');
 
-  /* Reply News: the stories, the best first. Greetings of the morning make videos of their own (m). */
+  /* Reply News: a video is conversations, whole, about ten messages: greetings said with love first, then
+     the longest talks; nobody in two talks of one video; in each video the talks follow the day (good
+     morning, take care and welcome home, loving talk, good night). A video of mostly morning greetings is
+     marked m (the page plays those in the morning). */
   const stories = Array.isArray(humor.stories) ? humor.stories : [];
   if (stories.length) {
-    const hc = stories.map(humorCard).filter(Boolean).sort((x, y) => (y.s - x.s) || (time(y) - time(x)));
-    const person = c => [String(c.a.h).toLowerCase(), String(c.b.h).toLowerCase()];
-    const morning = deal(hc.filter(c => c.k === 'morning'), (oldHumor.videos || []).filter(v => v.m), { person, group: c => c.k, cap: SIZE, tag: () => ({ m: 1 }), max: Math.round(MAX * 0.3) });
-    const day = deal(hc.filter(c => c.k !== 'morning'), (oldHumor.videos || []).filter(v => !v.m), { person, group: c => c.k, cap: 4, max: Math.round(MAX * 0.7) });
-    const videos = day.videos.concat(morning.videos);
-    const used = new Set(videos.flatMap(v => v.c));
-    const shown = hc.filter(c => used.has(c.id)).concat(hc.filter(c => !used.has(c.id)).slice(0, 200));
-    const file = { version: 1, lang: 'ja', made, size: SIZE, cards: shown, videos, replies, asked };
+    const seenMsg = new Set();
+    const talks = stories.map(talkCards).filter(t => t && !t.m.some(x => x.i && seenMsg.has(x.i)) && (t.m.forEach(x => x.i && seenMsg.add(x.i)), true));
+    const rank = t => t.gl * 100 + Math.min(t.m.length, 8) * 6 + t.s;
+    talks.sort((x, y) => (rank(y) - rank(x)) || (time(y) - time(x)));
+    const byId = new Map(talks.map(t => [t.i, t]));
+    const kept = (Array.isArray(oldHumor.videos) ? oldHumor.videos : []).filter(v => v && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(id))).slice(0, MAX);
+    const used = new Set(kept.flatMap(v => v.c));
+    const oldest = kept.length >= MAX ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
+    let free = talks.filter(t => !used.has(t.i) && time(t) > oldest);
+    const DAY = { morning: 0, home: 1, love: 2, icha: 2, miss: 2, other: 2, night: 3 };
+    const stamp = Date.now().toString(36);
+    const made = [];
+    while (free.reduce((n, t) => n + t.m.length, 0) >= SIZE - 2) {
+      const v = [];
+      const people = new Set();
+      let n = 0;
+      for (const strict of [true, false]) {
+        for (const t of free) {
+          if (n >= SIZE) break;
+          if (v.includes(t) || (n && n + t.m.length > SIZE + 2)) continue;
+          const who = [...new Set(t.m.map(x => String(x.h).toLowerCase()))];
+          if (strict && who.some(h => people.has(h))) continue;
+          v.push(t); who.forEach(h => people.add(h)); n += t.m.length;
+        }
+        if (n >= SIZE - 2) break;
+      }
+      if (n < SIZE - 2) break;
+      free = free.filter(t => !v.includes(t));
+      v.sort((x, y) => (DAY[x.k] ?? 2) - (DAY[y.k] ?? 2));
+      const morningMsgs = v.filter(t => t.k === 'morning').reduce((c, t) => c + t.m.length, 0);
+      /* g: how much of the video is greetings said with love (0 to 2). */
+      const g = Math.round(v.reduce((c, t) => c + t.gl * t.m.length, 0) / n * 10) / 10;
+      made.push({ i: 'v' + stamp + made.length.toString(36), at: v.reduce((m, t) => (time(t) > Date.parse(m || 0) ? t.at : m), ''), g, ...(morningMsgs * 2 > n ? { m: 1 } : {}), c: v.map(t => t.i) });
+    }
+    /* Greetings said with love first, then the newest. */
+    const videos = kept.concat(made).sort((x, y) => (Math.round((y.g || 0) * 2) - Math.round((x.g || 0) * 2)) || ((Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0))).slice(0, MAX);
+    const inVideos = new Set(videos.flatMap(v => v.c));
+    const shown = talks.filter(t => inVideos.has(t.i)).concat(talks.filter(t => !inVideos.has(t.i)).slice(0, 100));
+    const file = { version: 2, lang: 'ja', made, size: SIZE, talks: shown, videos, replies, asked };
     if (await save('stock-humor-ja.json', file)) changed = true;
-    console.log(`Reply News: ${hc.length} cards from ${stories.length} stories; videos: ${videos.length} (${day.made + morning.made} new, ${morning.videos.length} of the morning).`);
+    const msgs = {}; talks.forEach(t => { msgs[t.m.length] = (msgs[t.m.length] || 0) + 1; });
+    const gl = [0, 1, 2].map(g => talks.filter(t => t.gl === g).length);
+    console.log(`Reply News: ${talks.length} talks from ${stories.length} stories (messages per talk ${JSON.stringify(msgs)}; greeting with love ${gl[2]}, one of the two ${gl[1]}, neither ${gl[0]}); videos: ${videos.length} (${made.filter(v => videos.includes(v)).length} new, ${videos.filter(v => v.m).length} of the morning).`);
   } else console.log('Reply News: no stories yet.');
 
   if (changed) await writeFile(path.join(OUT, '.changed'), made + '\n');

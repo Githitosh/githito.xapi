@@ -11,8 +11,10 @@
    that open and do not close, a hole where a name was, a part that begins or ends on a particle: such a
    part is not used. A headline none of whose forms passes makes no card.
 
-   Reply News (a card in two beats that follow on from each other): the post, then the reply to it
-   (humorCard). For an account a reader asked for, the reply alone, in two parts (replyCard).
+   Reply News: a video is a conversation. Each message is a card in two beats: a part of it taken out
+   (excerpt: the greeting or the loving word in it), then the whole message (talkCards). A talk is the
+   back-and-forth humor.mjs kept between two people (story.t), or the post and its reply. For an account a
+   reader asked for, the reply alone (replyCard).
 
    Nothing here asks anything of anybody: it reads the files the collectors wrote. */
 import { cruel, personal, slander } from './filters.mjs';
@@ -273,22 +275,44 @@ export function newsCard(x) {
 }
 
 /* ---------- Reply News ---------- */
-const tidyTalk = t => String(t || '').replace(/^(?:\s*[@＠][A-Za-z0-9_]+)+/, '').replace(/https?:\/\/\S+/g, ' ').replace(/[─-▟]+/g, ' ').replace(/\s+/g, ' ').trim();
-/* A story as humor.mjs keeps it: the post, then the reply to it. The two follow on from each other. */
-export function humorCard(s) {
+const tidyTalk = t => String(t || '').replace(/^(?:\s*[@＠][A-Za-z0-9_]+)+/, '').replace(/https?:\/\/\S+/g, ' ').replace(/[\u2500-\u259f]+/g, ' ').replace(/\s+/g, ' ').trim();
+/* Greetings, and words said with love: the centre of the page. */
+export const GREET = /おはよ[うー〜ぉっんー]*|おはおは|おっはー|おやすみ(?:なさい|ん)?|おやす[ーみ]|おやぴ|ねんね|おかえり(?:なさい)?|ただいま|ただまー|いってらっしゃい|いってきます|いてら[ーっ〜]?|お疲れさま|おつかれさま|おつかれ|お疲れ|こんばんは|こんにちは|good ?morning|good ?night|night night|sweet dreams|welcome (?:home|back)/i;
+export const LOVE = /大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|好き|すき|しゅき|愛してる|あいしてる|会いたい|あいたい|ぎゅー*|ちゅー*|なでなで|よしよし|かわいい|可愛い|かわゆ|かっこいい|嬉しい|うれしい|ありがと[うー〜]*|♡|❤|💕|🥰|😘|love you|miss you|\bbabe\b/i;
+/* The part of a message the card opens on: its greeting, else its loving word, else its first phrase,
+   else its keyword. Letters only (no emoji, no faces), ten at most. */
+export function excerptOf(text) {
+  const plain = String(text || '').replace(EMOJI, ' ').replace(/[^ぁ-ヿ一-鿿々A-Za-z0-9ー〜！？!?♡、。\s]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const grab = re => { const m = plain.match(re); return m ? (m[0] + (plain.slice(m.index + m[0].length).match(/^[ー〜！!♡]{1,2}/) || [''])[0]).trim() : ''; };
+  /* (Not a loving word said the other way: 好きではなかった, かわいくない.) */
+  let x = grab(GREET) || grab(/(?:大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|愛してる|あいしてる|会いたい|あいたい|ぎゅー+|ちゅー+|なでなで|よしよし|かわいい|可愛い|かっこいい|嬉しい|うれしい|好き|すき|しゅき)(?!では|じゃ|じゃな|くな|にな[れら]な)/);
+  if (!x) x = (plain.split(/[。、！？!?\s]+/).find(p => len(p) >= 2) || '').trim();
+  if (len(x) > 10) x = keyword(x);
+  return [...(x || keyword(plain) || '')].slice(0, 10).join('');
+}
+/* A conversation: its messages in order, each a card { i (the post's number), h (who wrote it), to (whom
+   it answers), ja: [the part, the whole] }. gl: 2 for a greeting said with love, 1 for either, 0 for
+   neither. Null when a message may not play. */
+export function talkCards(s) {
   if (!s || !s.id || !s.a || !s.b) return null;
-  const a = tidyTalk(s.a.text), b = tidyTalk(s.b.text);
-  if (!a || !b || a === b || slander(a + ' ' + b)) return null;
-  return { id: String(s.id), k: s.kind || '', at: s.at || s.found || '', s: Number(s.score) || 0,
-    a: { h: s.a.handle, i: String(s.a.id || '') }, b: { h: s.b.handle, i: String(s.b.id || '') }, kw: keyword(a + ' ' + b), ja: [a, b] };
+  const msgs = Array.isArray(s.t) && s.t.length > 2 ? s.t.map(m => ({ h: m.h, x: m.x, i: m.i })) : [{ h: s.a.handle, x: s.a.text, i: s.a.id }, { h: s.b.handle, x: s.b.text, i: s.b.id }];
+  const m = [];
+  for (const [k, x] of msgs.entries()) {
+    const full = tidyTalk(x.x);
+    if (!full || slander(full) || cruel(full)) return null;
+    m.push({ i: String(x.i || ''), h: x.h, ...(k ? { to: msgs[k - 1].h } : {}), ja: [excerptOf(full), full] });
+  }
+  if (m.length < 2 || m[0].h === m[1].h) return null;
+  const all = m.map(x => x.ja[1]).join(' ');
+  const greet = GREET.test(all), love = LOVE.test(all);
+  return { i: String(s.id), k: s.kind || '', at: s.at || s.found || '', s: Number(s.score) || 0, gl: greet && love ? 2 : greet || love ? 1 : 0, m };
 }
 /* A reply to an account a reader asked for: the reply alone (the account's own post would read like
-   News), in two parts cut where it turns; a short one in one. post: the account's headline, for News. */
+   News), the part and the whole. on: the account's headline, for News. */
 export function replyCard(x, post) {
   if (!x || !x.id || !post) return null;
   const r = tidyTalk(x.t);
   if (!r || slander(r) || cruel(r)) return null;
-  const c = len(r) >= 16 ? cutJa(r) : [r, ''];
   const on = fixPart(len(post.t) > 30 ? shorten(tidyNews(post.t), 30) || tidyNews(post.t) : tidyNews(post.t));
-  return { id: String(x.id), ask: post.h, at: x.at || '', a: { h: post.h, i: String(x.n) }, b: { h: x.h, i: String(x.id) }, kw: keyword(r), ja: c[1] ? c : [r], on };
+  return { id: String(x.id), ask: post.h, at: x.at || '', a: { h: post.h, i: String(x.n) }, b: { h: x.h, i: String(x.id) }, kw: excerptOf(r), ja: [excerptOf(r), r], on };
 }

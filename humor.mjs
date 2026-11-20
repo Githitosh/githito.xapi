@@ -75,21 +75,27 @@ const shuffle = list => list.map(x => [Math.random(), x]).sort((a, b) => a[0] - 
 /* Each kind has its searches and the hours of the day (Japan) in which it is said. */
 const SEARCHES = {
   ja: [
-    { kind: 'morning', share: 0.28, hours: [5, 6, 7, 8, 9], q: [
-      '(おはおは OR おはよーだよ OR おっはー OR おはよん OR おはよぉ OR おはよーん)',
+    /* Greetings said with love are the centre of the page: good morning, good night, welcome home and
+       take care, with a heart, a 好き or a hug in them. Love without a greeting fills the rest. */
+    { kind: 'morning', share: 0.32, hours: [5, 6, 7, 8, 9, 10], q: [
       '(おはよう OR おはよ OR おはよー) (♡ OR 💕 OR 🥰 OR 😘 OR 好き OR 大好き OR ぎゅ)',
+      '(おはよう OR おはよ) (好き OR 大好き OR 会いたい OR ちゅ OR ぎゅー OR 愛してる)',
+      '(おはおは OR おはよーだよ OR おっはー OR おはよん OR おはよぉ OR おはよーん)',
+      '(おはよ♡ OR おはよう♡ OR おはよ〜♡ OR おはよっ♡ OR おはよー♡)',
       '(おはよう OR おはよ) (今日も頑張 OR いってらっしゃい OR 気をつけてね OR 起きれた OR 起きた？ OR 寒いね)',
-      '(おはよ♡ OR おはよう♡ OR おはよ〜 OR おはよっ OR おはよー！)',
     ] },
-    { kind: 'night', share: 0.1, hours: [21, 22, 23, 0, 1], q: [
-      '(おやすみん OR おやすー OR ねんね OR すやぁ OR おやぴ OR おやすみなさいませ)',
+    { kind: 'night', share: 0.2, hours: [21, 22, 23, 0, 1], q: [
       '(おやすみ OR おやすみなさい) (♡ OR 💕 OR 🥰 OR 😘 OR 好き OR 大好き OR また明日)',
+      '(おやすみ OR おやすみなさい) (夢で会 OR ぎゅー OR ちゅ OR 愛してる OR 会いたい)',
+      '(おやすみん OR おやすー OR ねんね OR すやぁ OR おやぴ OR おやすみなさいませ)',
     ] },
-    { kind: 'home', share: 0.1, hours: [17, 18, 19, 20, 21, 22], q: [
-      '(ただいまー OR おかえりー OR おつかれさま♡ OR おかえりなさい♡ OR がんばったね)',
+    { kind: 'home', share: 0.16, hours: [12, 13, 17, 18, 19, 20, 21, 22], q: [
       '(おかえり OR お疲れさま OR おつかれさま) (♡ OR 💕 OR 🥰 OR えらい OR 頑張ったね OR ゆっくりしてね)',
+      '(ただいま OR おかえり) (♡ OR 好き OR ぎゅ OR 会いたかった OR ちゅ)',
+      '(いってらっしゃい OR いってきます) (♡ OR 💕 OR 好き OR ちゅ OR 気をつけて)',
+      '(ただいまー OR おかえりー OR おつかれさま♡ OR おかえりなさい♡ OR がんばったね)',
     ] },
-    { kind: 'love', share: 0.52, hours: null, q: [
+    { kind: 'love', share: 0.32, hours: null, q: [
       '(だいしゅき OR すきすき OR ぎゅーして OR ちゅー OR 会いたいよ OR なでなで OR ♡)',
       '(彼氏 OR 彼女 OR 旦那 OR 嫁) (すき OR ぎゅー OR だいすき OR ありがと)',
       '(愛してる OR あいしてる OR 愛してるよ OR 大好きすぎ OR ずっと一緒にいようね OR 一生離さない)',
@@ -317,7 +323,39 @@ const SKIP = new Map();
 const speaksOfSchool = st => { const a = (st && st.author) || {}; return YOUTH.test(String((st && st.text) || '')) || AGE.test(String((st && st.text) || '')) || MINOR_BIO.test(String(a.description || '') + ' ' + String(a.name || '')); };
 function noteYouth(list) { list.forEach(st => { const h = handleOf(st).toLowerCase(); if (h && speaksOfSchool(st)) SKIP.set(h, stamp()); }); }
 const skipped = handle => SKIP.has(String(handle || '').toLowerCase());
-/* Every post-and-reply pair among the posts of one exchange, the best first. */
+/* The whole talk a pair belongs to: the messages the two wrote to each other before it and after it, in
+   order, each one fit to play here (romanceText, slander), each answering the one before. The pair's two
+   are among them. At most three before and four after. t: [{ h, x (the words), i (the post's number) }] */
+const TALK = { before: 3, after: 4 };
+function talkOf(pst, cst, byId, lang) {
+  const two = new Set([handleOf(pst), handleOf(cst)].map(h => h.toLowerCase()));
+  const said = st => { const x = romanceText(st, lang); return x && charLen(x) <= LONG[lang] && !slander(x) ? { h: handleOf(st), x, i: statusId(st) } : null; };
+  const before = [];
+  for (let cur = pst, k = 0; k < TALK.before; k++) {
+    const p = byId.get(parentOf(cur).id);
+    if (!p || !two.has(handleOf(p).toLowerCase()) || handleOf(p).toLowerCase() === handleOf(cur).toLowerCase()) break;
+    const m = said(p);
+    if (!m) break;
+    before.unshift(m);
+    cur = p;
+  }
+  const after = [];
+  for (let cur = cst, k = 0; k < TALK.after; k++) {
+    const id = statusId(cur), who = handleOf(cur).toLowerCase();
+    let next = null;
+    for (const st of byId.values()) {
+      if (parentOf(st).id !== id || !two.has(handleOf(st).toLowerCase()) || handleOf(st).toLowerCase() === who) continue;
+      const m = said(st);
+      if (m) { next = [st, m]; break; }
+    }
+    if (!next) break;
+    after.push(next[1]);
+    cur = next[0];
+  }
+  return [...before, { h: handleOf(pst), x: romanceText(pst, lang), i: statusId(pst) }, { h: handleOf(cst), x: romanceText(cst, lang), i: statusId(cst) }, ...after];
+}
+/* Every post-and-reply pair among the posts of one exchange, with the talk it belongs to: the longest talk
+   first, then the best. */
 function pairsIn(list, lang) {
   noteYouth(list);
   const byId = new Map();
@@ -326,9 +364,12 @@ function pairsIn(list, lang) {
   byId.forEach(cst => {
     const pst = byId.get(parentOf(cst).id);
     const pair = pst && !skipped(handleOf(pst)) && !skipped(handleOf(cst)) ? pairFrom(pst, cst, lang) : null;
-    if (pair) out.push(pair);
+    if (!pair) return;
+    const t = talkOf(pst, cst, byId, lang);
+    if (t.length > 2) pair.t = t;
+    out.push(pair);
   });
-  return out.sort((x, y) => y.score - x.score);
+  return out.sort((x, y) => ((y.t || []).length - (x.t || []).length) || (y.score - x.score));
 }
 
 /* ---------- the order the page plays in ---------- */
@@ -393,7 +434,7 @@ async function build(lang) {
   const file = path.join(CONF.out, 'v1', `humor-${lang}.json`);
   const before = await readJson(file, { stories: [] });
   const old = (Array.isArray(before.stories) ? before.stories : []).filter(s => s && s.id && s.a && s.b && s.a.text && s.b.text);
-  const have = new Set(old.flatMap(s => [s.id, s.a.id]));
+  const have = new Set(old.flatMap(s => [s.id, s.a.id, ...(Array.isArray(s.t) ? s.t.map(m => m.i) : [])]));
   const texts = new Set(old.flatMap(s => [squash(s.a.text).slice(0, 50), squash(s.b.text).slice(0, 50)]));
   /* What has been read as an exchange in the last two days is not read again. */
   const conv = {};
@@ -554,7 +595,12 @@ async function build(lang) {
         conv[batch[n].id] = stamp();
         list.forEach(st => { if (followers(st) <= 20000) meet(handleOf(st)); });
         let pairs = 0;
-        pairsIn(list, lang).forEach(pair => { if (pairs < 2 && keep(pair)) pairs++; });
+        const taken = new Set();
+        pairsIn(list, lang).forEach(pair => {
+          const ids = (pair.t || [pair.a, pair.b]).map(m => String(m.i || m.id));
+          if (pairs >= 2 || ids.some(i => taken.has(i))) return;
+          if (keep(pair)) { pairs++; ids.forEach(i => taken.add(i)); }
+        });
       });
       await sleep(1500);
     }
@@ -575,7 +621,18 @@ async function build(lang) {
   const pairText = s => s.a.text + ' ' + s.b.text;
   const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && !slander(pairText(s)) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !AGE.test(s.a.text) && !AGE.test(s.b.text) && !EMOJI_HINT.test(pairText(s))
     && !FAN.test(pairText(s)) && !BODY.test(pairText(s)) && !FAMILY.test(pairText(s)) && (lang === 'en' || (!POLITE.test(s.a.text) && !POLITE.test(s.b.text)));
-  const stories = found.filter(s => !skipped(s.a.handle) && !skipped(s.b.handle)).concat(old.filter(s => fresh(s) && ok(s) && !skipped(s.a.handle) && !skipped(s.b.handle)).map(s => ({ ...s, kind: talkKind(pairText(s)) }))).slice(0, CONF.keep);
+  const fine = x => cleanText(x) && !slander(x) && !UNSAFE_ROMANCE.test(x) && !YOUTH.test(x) && !AGE.test(x) && !EMOJI_HINT.test(x) && !FAN.test(x) && !BODY.test(x) && !FAMILY.test(x) && (lang === 'en' || !POLITE.test(x));
+  const talk = s => {
+    if (!Array.isArray(s.t)) return s;
+    const at = s.t.findIndex(m => String(m.i) === String(s.a.id));
+    let from = at, to = at + 1;
+    while (from > 0 && fine(s.t[from - 1].x)) from--;
+    while (to + 1 < s.t.length && fine(s.t[to + 1].x)) to++;
+    const t = at < 0 ? [] : s.t.slice(from, to + 1);
+    const { t: _, ...rest } = s;
+    return t.length > 2 ? { ...rest, t } : rest;
+  };
+  const stories = found.filter(s => !skipped(s.a.handle) && !skipped(s.b.handle)).concat(old.filter(s => fresh(s) && ok(s) && !skipped(s.a.handle) && !skipped(s.b.handle)).map(s => ({ ...s, kind: talkKind(pairText(s)) }))).map(talk).slice(0, CONF.keep);
   /* The memo: a number of accounts drawn at random is noted, from this run's best replies, then from the
      file's (those not yet in the memo, then any). A run that searched nothing notes nothing. */
   if (!off && memoFile) {
@@ -609,4 +666,6 @@ async function main() {
   }
   console.log(`Asked api.fxtwitter.com for ${asked} searches, ${timelineAsked} timelines (${timelineGave} answered) and ${convAsked} conversations; posts read another way: vxTwitter ${via.vxtwitter}, FixupX ${via.fixupx}.`);
 }
+/* (For checking the talks against exchanges read by hand.) */
+export { pairsIn };
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(e => { console.error(e.message || e); process.exit(1); });

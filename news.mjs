@@ -266,7 +266,17 @@ const echoes = (reply, news) => { const r = squash(reply), n = squash(news); ret
 /* ---------- the headlines ---------- */
 /* The accounts whose own posts are kept as headlines: the page plays them when replies are switched
    off, and for news that gets no replies (politics, public safety). */
-const HEAD_ONLY = { ja: [['ReutersJapan', 'ロイター', '', 0], ['bbcnewsjapan', 'BBCニュース', '', 0]] };
+/* News accounts read for their headlines only (the last ten: added when the pages stopped reading the web,
+   so that the news of business, of the world and of technology comes from X as well). */
+const HEAD_ONLY = {
+  ja: [
+    ['ReutersJapan', 'ロイター', '', 0], ['bbcnewsjapan', 'BBCニュース', '', 0],
+    ['BloombergJapan', 'ブルームバーグ', '', 0], ['WSJJapan', 'ウォール・ストリート・ジャーナル日本版', '', 0],
+    ['afpbbcom', 'AFPBB News', '', 0], ['cnn_co_jp', 'CNN.co.jp', '', 0],
+    ['nikkei_business', '日経電子版 ビジネス', '', 0], ['tokyo_shimbun', '東京新聞', '', 0], ['jcast_news', 'J-CASTニュース', '', 0],
+    ['cnet_japan', 'CNET Japan', 'science', 0], ['impress_watch', 'Impress Watch', 'science', 0], ['gizmodojapan', 'ギズモード・ジャパン', 'science', 0],
+  ],
+};
 const HEADS = {
   ja: ['nhk_news', 'YahooNewsTopics', 'livedoornews', '47news_official', 'kyodo_official', 'jijicom', 'asahi', 'mainichi', 'Yomiuri_Online', 'nikkei',
     'Sankei_news', 'tbsnewsdig', 'news24ntv', 'FNN_News', 'tv_asahi_news', 'ReutersJapan', 'bbcnewsjapan', 'oricon', 'modelpress', 'nikkansports',
@@ -476,7 +486,8 @@ async function build(lang) {
   Object.entries((before.readAt && typeof before.readAt === 'object') ? before.readAt : {}).forEach(([h, at]) => { if (Date.now() - Date.parse(at || 0) < 7 * 24 * 3600e3) readAt[h] = at; });
   const lastRead = h => Date.parse(readAt[String(h).toLowerCase()] || 0) || 0;
   const mainHeads = (HEADS[lang] || []).filter(h => !asked.has(h.toLowerCase()));
-  const otherHeads = shuffle(accounts.map(a => a[0]).filter(h => !asked.has(h.toLowerCase()) && !mainHeads.includes(h))).sort((x, y) => lastRead(x) - lastRead(y));
+  /* The others: the rest of the table and the headline-only accounts that are not among the main ones. */
+  const otherHeads = shuffle(everyAccount.map(a => a[0]).filter(h => !asked.has(h.toLowerCase()) && !mainHeads.includes(h))).sort((x, y) => lastRead(x) - lastRead(y));
   const queue = askedList.concat(shuffle(mainHeads)).concat(otherHeads).slice(0, askedList.length + CONF.headSearches).map(handle => ({ handle, tries: 0 }));
   /* With replies to read (accounts asked for) the headlines take three fifths of the time; otherwise nearly all of it. */
   const headUntil = deadline - (askedList.length ? CONF.minutes * 24e3 : 30e3);

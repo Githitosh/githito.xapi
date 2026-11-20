@@ -17,7 +17,7 @@
    reader asked for, the reply alone (replyCard).
 
    Nothing here asks anything of anybody: it reads the files the collectors wrote. */
-import { cruel, personal, slander, alcohol } from './filters.mjs';
+import { cruel, personal, slander, alcohol, tobacco } from './filters.mjs';
 
 /* ---------- who the news is about ---------- */
 /* A card of speed-read news says what happened on its second beat and who did it, said it or showed it on
@@ -281,22 +281,36 @@ export const GREET = /おはよ[うー〜ぉっんー]*|おはおは|おっは�
 export const LOVE = /大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|好き|すき|しゅき|愛してる|あいしてる|会いたい|あいたい|ぎゅー*|ちゅー*|なでなで|よしよし|かわいい|可愛い|かわゆ|かっこいい|嬉しい|うれしい|ありがと[うー〜]*|♡|❤|💕|🥰|😘|love you|miss you|\bbabe\b/i;
 /* The part of a message the card opens on: its greeting, else its loving word, else its first phrase,
    else its keyword. Letters only (no emoji, no faces), ten at most. */
-export function excerptOf(text) {
+/* The letter a greeting or a loving word stands for, when the message is no more than that word: the first
+   beat then shows that letter, not the whole message again (おはよ〜 → 朝). */
+const WORD_KANJI = [[/おはよ|おはおは|おっはー|good ?morning/i, '朝'], [/おやす|おやぴ|ねんね|こんばんは|good ?night|night night|sweet dreams/i, '夜'],
+  [/おかえり|ただいま|ただまー|welcome/i, '帰'], [/いってらっしゃい|いってきます|いてら/, '行'], [/お疲れ|おつかれ/, '労'], [/こんにちは/, '昼'],
+  [/愛してる|あいしてる/, '愛'], [/会いたい|あいたい|miss you/i, '会'], [/大好き|だいすき|だいしゅき|好き|すき|しゅき|love/i, '好'], [/ぎゅ/, '抱'],
+  [/ちゅ|kiss/i, '恋'], [/なでなで|よしよし/, '撫'], [/かわいい|可愛い|かわゆ|cute/i, '可愛'], [/かっこいい|カッコいい/, '格好'], [/嬉しい|うれしい/, '嬉'], [/ありがと|thank/i, '感謝']];
+const KIND_KANJI = { morning: '朝', night: '夜', home: '帰', love: '恋', icha: '愛', miss: '会', other: '話' };
+const LOVING = /(?:大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|愛してる|あいしてる|会いたい|あいたい|ぎゅー+|ちゅー+|なでなで|よしよし|かわいい|可愛い|かっこいい|嬉しい|うれしい|好き|すき|しゅき)(?!では|じゃ|じゃな|くな|にな[れら]な)/;
+/* The part of a message the card opens on (the first beat, large). Never the whole message:
+     1. its greeting (おはよ), else its loving word (大好き), when the message says more than that;
+     2. else the kanji its first word begins with (痩せても落ちない → 痩, 禁酒する → 禁酒, 学び → 学);
+     3. else its first katakana word (ポニテ);
+     4. else the letter its greeting or loving word stands for (おはよ〜 → 朝, 大好き♡ → 好), or the one for its
+        kind of talk (kind: morning 朝, night 夜, home 帰, love 恋…). */
+export function excerptOf(text, kind) {
   const plain = String(text || '').replace(EMOJI, ' ').replace(/[^ぁ-ヿ一-鿿々A-Za-z0-9ー〜！？!?♡、。\s]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const bare = t => String(t || '').replace(/[^ぁ-ゞァ-ヾ一-鿿々A-Za-z0-9]/g, '');
+  const whole = bare(plain);
+  /* A part is less than the whole when two letters or more of the message are left out. */
+  const part = x => { const n = bare(x); return n && len(n) <= len(whole) - 2 ? x : ''; };
   const grab = re => { const m = plain.match(re); return m ? (m[0] + (plain.slice(m.index + m[0].length).match(/^[ー〜！!♡]{1,2}/) || [''])[0]).trim() : ''; };
-  /* (Not a loving word said the other way: 好きではなかった, かわいくない.) */
-  let x = grab(GREET) || grab(/(?:大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|愛してる|あいしてる|会いたい|あいたい|ぎゅー+|ちゅー+|なでなで|よしよし|かわいい|可愛い|かっこいい|嬉しい|うれしい|好き|すき|しゅき)(?!では|じゃ|じゃな|くな|にな[れら]な)/);
-  if (!x) x = (plain.split(/[。、！？!?\s]+/).find(p => len(p) >= 2) || '').trim();
-  /* A long first phrase: its first words, as the dictionary divides them, up to nine letters (痩せても落ちない),
-     not a piece cut out of a word (せても). */
-  if (len(x) > 10) {
+  let x = part(grab(GREET)) || part(grab(LOVING));
+  if (!x) {
     let words = [];
-    try { words = [...new Intl.Segmenter('ja', { granularity: 'word' }).segment(x)].map(w => w.segment); } catch (e) { words = []; }
-    let out = '';
-    for (const w of words) { if (len(out + w) > 9) break; out += w; }
-    x = len(out.trim()) >= 2 ? out.trim() : keyword(x);
+    try { words = [...new Intl.Segmenter('ja', { granularity: 'word' }).segment(plain)].filter(w => w.isWordLike).map(w => w.segment); } catch (e) { words = []; }
+    const kanji = words.map(w => (w.match(/^[一-鿿々]{1,4}/) || [''])[0]).find(k => k && !PLAIN_WORD.test(k));
+    x = part(kanji || '') || part((words.find(w => /^[゠-ヿ]{2,8}$/.test(w)) || ''));
   }
-  return [...(x || keyword(plain) || '')].slice(0, 10).join('');
+  if (!x) x = (WORD_KANJI.find(([re]) => re.test(plain)) || [null, ''])[1] || KIND_KANJI[kind] || '話';
+  return [...x].slice(0, 10).join('');
 }
 /* A conversation: its messages in order, each a card { i (the post's number), h (who wrote it), to (whom
    it answers), ja: [the part, the whole] }. gl: 2 for a greeting said with love, 1 for either, 0 for
@@ -307,8 +321,8 @@ export function talkCards(s) {
   const m = [];
   for (const [k, x] of msgs.entries()) {
     const full = tidyTalk(x.x);
-    if (!full || slander(full) || cruel(full) || alcohol(full)) return null;
-    m.push({ i: String(x.i || ''), h: x.h, ...(k ? { to: msgs[k - 1].h } : {}), ja: [excerptOf(full), full] });
+    if (!full || slander(full) || cruel(full) || alcohol(full) || tobacco(full)) return null;
+    m.push({ i: String(x.i || ''), h: x.h, ...(k ? { to: msgs[k - 1].h } : {}), ja: [excerptOf(full, s.kind), full] });
   }
   if (m.length < 2 || m[0].h === m[1].h) return null;
   const all = m.map(x => x.ja[1]).join(' ');
@@ -320,7 +334,7 @@ export function talkCards(s) {
 export function replyCard(x, post) {
   if (!x || !x.id || !post) return null;
   const r = tidyTalk(x.t);
-  if (!r || slander(r) || cruel(r) || alcohol(r)) return null;
+  if (!r || slander(r) || cruel(r) || alcohol(r) || tobacco(r)) return null;
   const on = fixPart(len(post.t) > 30 ? shorten(tidyNews(post.t), 30) || tidyNews(post.t) : tidyNews(post.t));
-  return { id: String(x.id), ask: post.h, at: x.at || '', a: { h: post.h, i: String(x.n) }, b: { h: x.h, i: String(x.id) }, kw: excerptOf(r), ja: [excerptOf(r), r], on };
+  return { id: String(x.id), ask: post.h, at: x.at || '', a: { h: post.h, i: String(x.n) }, b: { h: x.h, i: String(x.id) }, kw: excerptOf(r, 'other'), ja: [excerptOf(r, 'other'), r], on };
 }

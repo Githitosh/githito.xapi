@@ -68,7 +68,7 @@ async function record() {
   const nr = news.run || {};
   const run = {
     at: stamp(),
-    humor: inRun(hr.at) ? { new: Number(hr.stories) || 0, searches: Number(hr.searches) || 0, timelines: Number(hr.timelines) || 0, exchanges: Number(hr.conversations) || 0, refused: sum(hr.refused) } : null,
+    humor: inRun(hr.at) ? { new: Number(hr.stories) || 0, searches: Number(hr.searches) || 0, timelines: Number(hr.timelines) || 0, exchanges: Number(hr.conversations) || 0, refused: sum(hr.refused), memo: Number(hr.memo) || 0, memoTotal: Number(hr.memoTotal) || 0 } : null,
     news: inRun(nr.at) ? { new: Number(nr.heads) || 0, accounts: Number(nr.headSearches) || 0, replies: Number(nr.items) || 0, refused: sum(nr.headRefused) } : null,
   };
   const total = { humor: (humor.stories || []).length, news: (news.heads || []).length, replies: (news.items || []).length };
@@ -181,6 +181,7 @@ function summary(hours, run, sums, now) {
   if (sums.replies || total(list, 'replies')) out.push(`| ニュース（頼んだアカウントへの返信） | ${run.news ? '+' + run.news.replies + ' 件' : '実行なし'} | +${total(list, 'replies')} 件 | ${sums.replies} 件 |`);
   out.push('');
   if (run.humor) out.push(`- リプライニュース：検索 ${run.humor.searches} 回、タイムライン ${run.humor.timelines} 件、会話の読み出し ${run.humor.exchanges} 件、断られた回数 ${run.humor.refused}`);
+  if (run.humor && run.humor.memoTotal) out.push(`- リプライニュース：おもしろい恋愛リプライのアカウントを ${run.humor.memo} 件記録（記録の合計 ${run.humor.memoTotal} 件）`);
   if (run.news) out.push(`- ニュース：読んだアカウント ${run.news.accounts}、断られた回数 ${run.news.refused}`);
   out.push('');
   out.push('### 1時間ごと（直近24時間・日本時間）');

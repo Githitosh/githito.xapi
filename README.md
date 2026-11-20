@@ -75,6 +75,19 @@
 - 再生する順番はここで乱数で決めます（上の「何を流すかは、ここで決めます」）。ページは朝（4〜11時）は `play.morning`、夜（20〜4時）は `play.night`、それ以外は `play.day` を上から読みます。
 - `config.json` の `humor` で設定します（`"on": false` で止まります）。`source` が `off` でも、こちらは動きます。
 
+### おもしろい恋愛リプライをするアカウントの記録（`humor-memo-ja.json`）
+
+良い会話になったリプライを書いたアカウントを、収集のたびに記録します。
+
+- **毎回、乱数で決めた数（10〜16件）を記録**します。その回に見つけた会話のうち点数の高いリプライを書いた人から順に、
+  足りなければファイルにある会話から（まだ記録していない人を先に）選びます。
+- 記録するのは、アカウント名（`h`）、最初と最後に記録した時刻（`first`・`last`）、記録した回数（`n`）、いちばん高かった点数（`best`）だけです。
+  **投稿の本文は入れません。**
+- **次の収集で、記録したアカウントを先に読みます**（同じく乱数で決めた数だけ、前に読んでから時間がたった順）。
+  好意のあるやりとりをする人同士は、またやりとりをするからです。1人が取りすぎない上限（ファイル全体で4組、1回で2組）はそのままです。
+- 30日のあいだ一度も記録し直されなかったアカウントは消します。学校の話をしている人（除外リスト）も消します。全体で最大300件です。
+- ほかのフィルター（未成年の除外、フォロワーの多い有名人の除外、誹謗中傷の除外など）は、記録したアカウントにもそのまま効きます。
+
 ## ニュースページ用のデータ（`news-ja.json`）
 
 ニュースのページ（https://githitosh.github.io/news-shorts/ ）は、Xだけを情報源にします。`news.mjs` があらかじめ次の2つを集めて
@@ -152,6 +165,7 @@
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/humor-ja.json` | ユーモアページ用：恋愛のやりとり（最大600組） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/stats.json` | 取り込み量：1時間ごとの新しい会話・見出しの数（7日分）と、最後の実行の数字 |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/intake.svg` | 取り込み量のグラフ（直近48時間の画像） |
+| `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/humor-memo-ja.json` | おもしろい恋愛リプライをするアカウントの記録（アカウント名・回数・点数。本文なし、最長30日、最大300件） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/index.json` | 最終更新の時刻と、ジャンルごとの件数 |
 
 ジャンル：`space` `politics` `science` `culture` `local` `entertainment` `safety` `sports` `food`

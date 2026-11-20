@@ -345,6 +345,43 @@ function humorPlay(stories) {
   return { made: stamp(), morning: ids(deal(mornings, loving, 0.3, 2, true)), day: ids(deal(loving, homes, 0.3, 2, true)), night: ids(deal(loving, nights, 0.3, 2, true)) };
 }
 
+/* ---------- the accounts worth coming back to ---------- */
+/* Those whose loving replies made the best stories are remembered, in v1/humor-memo-<lang>.json. At every
+   run a number of accounts drawn at random, ten to sixteen, is noted: those who wrote the best replies of
+   the run first, then of the file, those not yet noted before those already there. What is kept is the
+   account's name, when it was first and last noted, how many times, and its best score: nobody's words.
+   In the following runs their latest posts are read first (as many again, drawn the same way, those read
+   longest ago first): people who answer each other lovingly do so again.
+   An account that is not noted again for thirty days is forgotten, and so is one that speaks of school
+   (the skip list). The memo holds 300 at most. */
+const MEMO = { least: 10, span: 7, days: 30, keep: 300 };
+const drawCount = () => MEMO.least + Math.floor(Math.random() * MEMO.span);   // 10 to 16
+function memoFrom(file) {
+  const memo = {};
+  Object.values((file && file.accounts && typeof file.accounts === 'object') ? file.accounts : {}).forEach(m => {
+    if (!m || !/^[A-Za-z0-9_]{1,15}$/.test(String(m.h || ''))) return;
+    if (Date.now() - Date.parse(m.last || 0) > MEMO.days * 24 * 3600e3 || skipped(m.h)) return;
+    memo[String(m.h).toLowerCase()] = { h: String(m.h), first: m.first || m.last, last: m.last, n: Number(m.n) || 1, best: Number(m.best) || 0 };
+  });
+  return memo;
+}
+/* Notes `count` accounts from the stories given (best reply first); returns the names noted. */
+function noteAccounts(memo, lists, count) {
+  const noted = [];
+  const byScore = list => list.slice().sort((x, y) => (Number(y.score) || 0) - (Number(x.score) || 0));
+  lists.forEach(list => byScore(list).forEach(s => {
+    const h = String((s && s.b && s.b.handle) || '');
+    const k = h.toLowerCase();
+    if (noted.length >= count || !h || noted.includes(k) || skipped(h)) return;
+    noted.push(k);
+    const m = memo[k] || { h, first: stamp(), n: 0, best: 0 };
+    memo[k] = { h, first: m.first, last: stamp(), n: (Number(m.n) || 0) + 1, best: Math.max(Number(m.best) || 0, Number(s.score) || 0) };
+  }));
+  /* The memo holds so many: the ones noted longest ago go. */
+  Object.values(memo).sort((x, y) => Date.parse(y.last) - Date.parse(x.last)).slice(MEMO.keep).forEach(m => { delete memo[m.h.toLowerCase()]; });
+  return noted;
+}
+
 /* ---------- one language ---------- */
 async function build(lang) {
   const file = path.join(CONF.out, 'v1', `humor-${lang}.json`);
@@ -379,6 +416,12 @@ async function build(lang) {
   const known = new Set();
   const people = [];
   const meet = handle => { const h = String(handle || ''); const k = h.toLowerCase(); if (!h || known.has(k) || skipped(h)) return; known.add(k); people.push(h); };
+  /* The accounts in the memo come first (see above): a number drawn at random, those read longest ago first. */
+  const memoFile = path.join(CONF.out, 'v1', `humor-memo-${lang}.json`);
+  const memo = memoFrom(await readJson(memoFile, {}));
+  const memoFirst = shuffle(Object.values(memo)).sort((x, y) => (Date.parse(readAt[x.h.toLowerCase()] || 0) || 0) - (Date.parse(readAt[y.h.toLowerCase()] || 0) || 0)).slice(0, drawCount()).map(m => m.h);
+  memoFirst.forEach(meet);
+  if (memoFirst.length) console.log(`  ${lang}: ${Object.keys(memo).length} accounts in the memo; ${memoFirst.length} of them are read first`);
   shuffle(old.flatMap(s => [s.a.handle, s.b.handle])).sort((x, y) => (Date.parse(readAt[x.toLowerCase()] || 0) || 0) - (Date.parse(readAt[y.toLowerCase()] || 0) || 0)).forEach(meet);
   const cands = [];   // loving replies found by search, to be read as exchanges
   const posts = [];   // answered posts from the timelines, to be read as exchanges
@@ -524,6 +567,21 @@ async function build(lang) {
   const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && !slander(pairText(s)) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !AGE.test(s.a.text) && !AGE.test(s.b.text) && !EMOJI_HINT.test(pairText(s))
     && !FAN.test(pairText(s)) && !BODY.test(pairText(s)) && !FAMILY.test(pairText(s)) && (lang === 'en' || (!POLITE.test(s.a.text) && !POLITE.test(s.b.text)));
   const stories = found.filter(s => !skipped(s.a.handle) && !skipped(s.b.handle)).concat(old.filter(s => fresh(s) && ok(s) && !skipped(s.a.handle) && !skipped(s.b.handle)).map(s => ({ ...s, kind: talkKind(pairText(s)) }))).slice(0, CONF.keep);
+  /* The memo: a number of accounts drawn at random is noted, from this run's best replies, then from the
+     file's (those not yet in the memo, then any). A run that searched nothing notes nothing. */
+  if (!off) {
+    const kept = new Set(stories.map(s => s.id));
+    const fresh0 = found.filter(s => kept.has(s.id));
+    const noted = noteAccounts(memo, [fresh0, stories.filter(s => !memo[String(s.b.handle).toLowerCase()]), stories], drawCount());
+    count.memo = noted.length;
+    count.memoTotal = Object.keys(memo).length;
+    console.log(`  ${lang}: ${noted.length} accounts noted for their replies; the memo holds ${count.memoTotal}`);
+    if (!CONF.dry) {
+      await mkdir(path.dirname(memoFile), { recursive: true });
+      const accounts = Object.fromEntries(Object.values(memo).sort((x, y) => (y.best - x.best) || (Date.parse(y.last) - Date.parse(x.last))).map(m => [m.h.toLowerCase(), m]));
+      await writeFile(memoFile, JSON.stringify({ version: 1, lang, updated: stamp(), noted, accounts }, null, 1) + '\n');
+    }
+  }
   const kinds = {};
   stories.forEach(s => { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
   console.log(`  ${lang}: ${count.searches} searches gave ${count.replies} replies, ${count.candidates} of them may play; ${count.timelines} timelines gave ${count.posts} answered posts; ${count.conversations} exchanges read whole (${count.otherWay} posts another way); ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)}.`);

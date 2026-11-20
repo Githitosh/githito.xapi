@@ -32,7 +32,11 @@
 
 ## 動画のストック（`stock-news-ja.json`、`stock-humor-ja.json`）
 
-**ページは、ここで作って確認済みの文章を受け取って流すだけです**（ページ側では文章を作りません）。毎回の収集（30分ごと）のあとに：
+**ページは、ここで作って確認済みの文章を受け取って流すだけです**（ページ側では文章を作りません）。
+**文章の組み立てはすべてこのリポジトリのプログラム**（`compose.mjs`）で、**外部の非公式サービスは使いません**：翻訳はしません
+（以前使っていた Google 翻訳の非公式の窓口はやめました）。**英語のニュース**は、英語のニュースアカウント（Reuters・AP・BBC・NHK World・
+共同 など）の投稿を `english.mjs` が集め、英語のまま `compose.mjs` がカードにします（`stock-news-en.json`）。
+（X の投稿を読む部分は、今も FxTwitter を使っています。X の公式APIは有料のためです。）毎回の収集（30分ごと）のあとに：
 
 1. **フィルタ**：集めるときのフィルタ（残酷・個人攻撃・誹謗中傷）を通ったものだけを使います。広告（PR）も外します。
    **お酒とタバコの話もニュースから外します**（未成年の利用を考えて）。ただし**企業の話は残します**（アサヒビールの決算や新商品、JTの値上げなど：
@@ -211,6 +215,8 @@
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/match-ja.json` | マッチングニュース用：単独で読める投稿（`posts`）と、どの投稿にも合う一言（`lines`） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/stock-news-ja.json` | ニュースページの動画ストック：確認済みのカード（3コマの文章）と、約100本の動画の構成 |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/stock-humor-ja.json` | ユーモアページの動画ストック：確認済みの会話（1通ずつ［一部, 全文］の2コマ）と、約100本の動画の構成 |
+| `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/stock-news-en.json` | 英語のニュースの動画ストック：英語のニュースから英語のまま組み立てたカード（翻訳なし） |
+| `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/news-en.json` | 英語のニュースの見出し（英語のニュースアカウントの投稿、72時間） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/people-ja.json` | ニュースへの個人の反響：フォロワーといいねのある個人の返信（政治・治安以外、48時間） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/news-ja.json` | ニュースページ用：Xのニュースの見出し（最大1500件）と、頼まれたアカウントへの真面目な返信（最大2000件） |
 | `https://raw.githubusercontent.com/Githitosh/githito.xapi/api/v1/humor-ja.json` | ユーモアページ用：恋愛のやりとり（最大600組） |

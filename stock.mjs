@@ -4,6 +4,7 @@
    were while their cards are still in the files. About a hundred videos are kept, the newest first.
 
      v1/stock-news-ja.json   News: cards { id, h, n, g, at, kw, ja: [what, who], how, q? }
+     v1/stock-news-en.json   News in English: cards written from English news (english.mjs; nothing translated)
      v1/stock-humor-ja.json  Reply News: talks { i, k, at, s, gl, m: [{ i, h, to, ja: [part, whole] }] }
                              (a talk is a conversation; a message is a card)
      both: videos [{ i, at, c: [card or talk ids], m? }], replies (to the accounts readers asked for), asked
@@ -14,7 +15,7 @@
      node stock.mjs --out public [--videos 100] [--size 10] */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { newsCard, talkCards, replyCard, personCard } from './compose.mjs';
+import { newsCard, newsCardEn, talkCards, replyCard, personCard } from './compose.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -137,6 +138,22 @@ async function main() {
     const withPeople = d.videos.filter(v => v.c.some(id => said.some(c => c.id === id))).length;
     console.log(`News: ${cards.length} cards from ${heads.length} headlines ${JSON.stringify(how)}; ${said.length} cards of what people said; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept, ${withPeople} end on what people said), ${d.waiting} cards wait for the next video; ${replies.length} replies to asked accounts.`);
   } else console.log('News: no headlines yet.');
+
+  /* News in English: written from the English news itself (newsCardEn), dealt in the same way. */
+  const newsEn = await readJson(path.join(OUT, 'v1', 'news-en.json'), {});
+  const oldEn = await readJson(path.join(OUT, 'v1', 'stock-news-en.json'), {});
+  const headsEn = Array.isArray(newsEn.heads) ? newsEn.heads : [];
+  if (headsEn.length) {
+    const seenEn = new Set();
+    const cardsEn = headsEn.map(newsCardEn).filter(c => c && !seenEn.has(c.id) && !seenEn.has(c.ja.join('|')) && (seenEn.add(c.id), seenEn.add(c.ja.join('|')), true))
+      .sort((x, y) => time(y) - time(x));
+    const d = deal(cardsEn, oldEn.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 3, version: 2 });
+    const used = new Set(d.videos.flatMap(v => v.c));
+    const file = { version: 1, lang: 'en', made, size: SIZE, cards: cardsEn.filter(c => used.has(c.id)).concat(cardsEn.filter(c => !used.has(c.id)).slice(0, 300)), videos: d.videos };
+    if (await save('stock-news-en.json', file)) changed = true;
+    const howEn = {}; cardsEn.forEach(c => { howEn[c.how] = (howEn[c.how] || 0) + 1; });
+    console.log(`News in English: ${cardsEn.length} cards from ${headsEn.length} headlines ${JSON.stringify(howEn)}; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept).`);
+  } else console.log('News in English: no headlines yet.');
 
   /* Reply News: a video is conversations, whole, about ten messages: greetings said with love first, then
      the longest talks; nobody in two talks of one video; in each video the talks follow the day (good

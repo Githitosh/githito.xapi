@@ -799,7 +799,10 @@ async function build(lang) {
     .filter(x => { if (!x.q) return true; const k = String(x.h).toLowerCase(); askedKept.set(k, (askedKept.get(k) || 0) + 1); return askedKept.get(k) <= ASKED.keep; })
     .slice(0, CONF.headKeep);
   /* The headlines in English too, for the card (the newest first; those done in earlier runs keep theirs). */
-  if (!flag('no-translate')) {
+  /* (No translation: Google's translation without a key is no official service. English news is collected
+     and written in English by english.mjs.) */
+  heads.forEach(x => { delete x.e; });
+  if (false) {
     const todo = heads.filter(x => !x.e).slice(0, CONF.translate);
     const en = todo.length ? await intoEnglish(todo.map(x => x.t.replace(/【[^】]*】/g, ' ').trim() || x.t)) : [];
     todo.forEach((x, i) => { if (en[i]) x.e = en[i]; });

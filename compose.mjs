@@ -320,6 +320,84 @@ export function personCard(p, news) {
   return { id: String(p.id), h: p.h, n: name, g: (news && news.g) || p.g || '', at: p.at || p.found || '', kw, ...(tp ? { tp } : {}), ja: [words, len(name) >= 2 ? name : '@' + p.h], how: 'person', f: p.f || 0, l: p.l || 0 };
 }
 
+/* ---------- News in English ---------- */
+/* An English headline as english.mjs keeps it, in three beats as the Japanese: a keyword, what happened,
+   who. Written here from the English itself (nothing is translated):
+     who: the subject of "X says / warns / wins …" (Myanmar says UN court finding … → Myanmar), the one a
+          headline is attributed to (…, Reuters reports; …: officials), a name before a colon;
+     else the headline in two parts, cut where it turns (a comma, a colon, "as", "after", "amid");
+     else the whole headline and the paper. */
+const SMALL_EN = new Set(['a', 'an', 'the', 'of', 'to', 'in', 'on', 'at', 'for', 'from', 'by', 'with', 'and', 'or', 'as', 'is', 'are', 'was', 'were', 'be', 'its', 'his', 'her', 'their', 'it', 'this', 'that', 'new', 'more', 'after', 'over', 'into', 'than', 'but', 'not']);
+const SECTION_EN = /^(?:sumo|baseball|football|soccer|tennis|golf|f1|nba|nfl|mlb|markets?|business|tech|science|health|travel|food|culture|world|japan|asia|us|uk|europe|weather|photos?|video|explainer|analysis)$/i;
+const SAY_EN = /^(.{2,60}?)\s+(says|said|warns|claims|announces|confirms|denies|vows|urges|calls for|plans|agrees|wins|beats|signs|launches|unveils|reveals|reports|admits|rejects|backs|approves|passes|tells|asks|orders|names|buys|sells|cuts|raises)\s+(.{8,})$/i;
+const capWords = t => (t.match(/\b[A-Z][a-zA-Z'’.-]{2,}\b/g) || []).filter(w => !SMALL_EN.has(w.toLowerCase()));
+function keywordEn(text, not) {
+  const no = String(not || '').toLowerCase();
+  /* A name of one or two words written with capitals (Andy Burnham, United Nations), its last word when long. */
+  const OPENERS = /^(?:The|A|An|In|On|At|How|Why|What|When|Who|New|First|More|Is|Are|Will|Can|Beats|Says|After|As)$/;
+  const names = (String(text).match(/\b[A-Z][a-zA-Z'’.-]+(?:\s+[A-Z][a-zA-Z'’.-]+)?/g) || []).map(p => p.replace(/['’]s$/, '').replace(/[.'’-]+$/, ''))
+    .filter(p => !OPENERS.test(p.split(' ')[0]) && !SMALL_EN.has(p.toLowerCase()) && !no.includes(p.toLowerCase()));
+  if (names.length) { const p = names[0]; return p.length <= 14 ? p : p.split(' ').pop(); }
+  const words = String(text).split(/\s+/).map(w => w.replace(/[^A-Za-z0-9-]/g, '')).filter(w => w.length >= 4 && !SMALL_EN.has(w.toLowerCase()));
+  return (words.sort((a, b) => b.length - a.length)[0] || 'NEWS');
+}
+function cutEn2(t) {
+  const w = t.split(' ');
+  const n = w.length;
+  if (n < 7) return [t, ''];
+  let best = null;
+  for (let i = Math.max(2, Math.floor(n * 0.3)); i <= n - Math.max(2, Math.floor(n * 0.3)); i++) {
+    const prev = w[i - 1], next = (w[i] || '').toLowerCase();
+    let gain = 0;
+    if (/[.:;!?]$/.test(prev)) gain = 10;
+    else if (/,$/.test(prev)) gain = 8;
+    else if (/^(?:as|after|amid|while|despite|because|before|until|but)$/.test(next)) gain = 6;
+    /* Between who and what they do (… European Union | will meet …, … drone system | has pushed …). */
+    else if (/^(?:will|would|has|have|had|is|are|was|were|could|can|may|might|plans|says|said)$/.test(next) && i >= 3) gain = 5;
+    else if (/^(?:with|over|for|to|in|at|on)$/.test(next)) gain = 2;
+    if (SMALL_EN.has(prev.toLowerCase().replace(/[^a-z]/g, '')) || /^(?:and|or|the|a|an|of)$/.test(next)) gain = 0;
+    const off = Math.abs(i - n / 2) / n;
+    const score = gain * 10 - off * off * 400;
+    if (gain > 0 && (!best || score > best.score)) best = { score, i };
+  }
+  if (!best) return [t, ''];
+  return [w.slice(0, best.i).join(' ').replace(/[,;:]+$/, ''), w.slice(best.i).join(' ')];
+}
+const shortEn = (t, max) => { if (t.length <= max) return t; const cut = t.slice(0, max); const i = Math.max(cut.lastIndexOf(', '), cut.lastIndexOf(': '), cut.lastIndexOf(' - ')); return i > max * 0.5 ? cut.slice(0, i) : ''; };
+export function newsCardEn(x) {
+  if (!x || !x.id || !x.t) return null;
+  /* A label the headline starts with (Sumo:, Analysis:) is the topic, not a part of it. */
+  const full = String(x.t).replace(/\s+/g, ' ').trim();
+  const label = (full.match(/^([^:]{2,20}):\s+(?=.{20,})/) || [])[1];
+  const section = label && SECTION_EN.test(label.trim()) ? label.trim() : '';
+  const t = section ? full.slice(full.indexOf(':') + 1).trim() : full;
+  const fine = (s, second) => s && s.length >= 3 && s.length <= 90 && !(second && /^(?:and|or|but|of|the|a|an)\b/i.test(s)) && !/\b(?:and|or|but|as|to|of|in|on|for|the|a|an|with)$/i.test(s);
+  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  const tries = [];
+  let m = t.match(SAY_EN);
+  if (m && capWords(m[1]).length && m[1].split(' ').length <= 6) {
+    const verb = m[2].toLowerCase();
+    const what = /^(says|said|warns|claims|tells|reports|admits)$/.test(verb) ? cap(m[3].replace(/^that\s+/i, '')) : cap(m[2] + ' ' + m[3]);
+    tries.push(['who', shortEn(what, 90) || what, m[1]]);
+  }
+  m = t.match(/^(.{8,}?),?\s+(?:according to|says|said)\s+([A-Za-z][^,.;]{2,40})[.]?$/);
+  if (m) tries.push(['who', m[1], cap(m[2].replace(/^(?:a|an|the)\s+/i, ''))]);
+  m = t.match(/^([^:]{2,40}):\s+(.{8,})$/);
+  if (m && !SECTION_EN.test(m[1].trim()) && capWords(m[1]).length && m[1].split(' ').length <= 5) tries.push(['who', m[2], m[1].trim()]);
+  const c = cutEn2(t);
+  if (c[1]) tries.push(['cut', c[0], cap(c[1])]);
+  if (t.length <= 90) tries.push(['paper', t, x.n || x.h]);
+  else { const s = shortEn(t, 90); if (s) tries.push(['paper', s, x.n || x.h]); }
+  for (const [how, a, b] of tries) {
+    if (!fine(a) || !(how === 'who' || how === 'paper' ? b && b.length <= 40 : fine(b, true))) continue;
+    /* The keyword: who it is, when that is short (Myanmar); else the first name in what happened. */
+    const kw = how === 'who' && b.split(' ').length <= 2 && b.length <= 14 ? b : keywordEn(a + ' ' + (how === 'cut' ? b : ''));
+    const tp = section || keywordEn(full, kw);
+    return { id: String(x.id), h: x.h, n: x.n || '', g: x.g || '', at: x.at || x.found || '', kw, ...(tp && tp !== kw && tp !== 'NEWS' ? { tp } : {}), ja: [a, b], how, lang: 'en' };
+  }
+  return null;
+}
+
 /* ---------- Reply News ---------- */
 const tidyTalk = t => String(t || '').replace(/^(?:\s*[@＠][A-Za-z0-9_]+)+/, '').replace(/https?:\/\/\S+/g, ' ').replace(/[\u2500-\u259f]+/g, ' ').replace(/\s+/g, ' ').trim();
 /* Greetings, and words said with love: the centre of the page. */

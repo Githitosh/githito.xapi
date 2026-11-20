@@ -73,6 +73,10 @@ export const SLANDER = new RegExp(SLANDER_WORDS.join('|'));
 /* Harmless sayings are taken out before the words are looked for (a nail driven home is a warning). */
 const SAYINGS = /(?:くぎ|釘|クギ|とどめ|トドメ)を?刺|(?:蚊|ハチ|蜂|虫|クラゲ)に刺/g;
 const plain = text => String(text || '').replace(SAYINGS, '');
-export const cruel = text => CRUEL.test(plain(text));
-export const personal = text => PERSONAL.test(plain(text));
+/* The same in English (English news, english.mjs): killing and bodies, sexual violence and abuse, harm
+   to children; a person before the law, allegations, private life. */
+export const CRUEL_EN = /\b(?:kill(?:s|ed|ing|er|ers)?|murder(?:s|ed|er|ers)?|dead|death(?:s)?|died|dies|dying|bod(?:y|ies)|corpse|massacre|slaughter|behead\w*|tortur\w*|execut(?:e|ed|ion|ions)|suicid\w*|stab(?:s|bed|bing)?|shoot(?:s|ing|ings|er)?|shot|gunm(?:a|e)n|gunfire|bomb(?:s|ing|ings|ed)?|blast|rape[ds]?|raping|sexual(?:ly)? (?:assault|abuse)\w*|molest\w*|abus(?:e|ed|es|ing)|traffick\w*|kidnap\w*|hostage(?:s)?|genocide|war crime(?:s)?|casualt(?:y|ies)|wounded|injur(?:ed|ies|y))\b/i;
+export const PERSONAL_EN = /\b(?:arrest(?:s|ed|ing)?|charged|charges|indict\w*|convict\w*|sentenc(?:e|ed|ing)|jail(?:s|ed)?|prison|suspect(?:s|ed)?|accus(?:e|ed|es|ation|ations)|alleg(?:e|ed|es|ation|ations)|scandal(?:s)?|affair|lawsuit|sued|sues|fraud|bribe\w*|harass\w*|probe|investigat\w*|drug(?:s)?|cocaine|cannabis|overdose)\b/i;
+export const cruel = text => CRUEL.test(plain(text)) || CRUEL_EN.test(String(text || ''));
+export const personal = text => PERSONAL.test(plain(text)) || PERSONAL_EN.test(String(text || ''));
 export const slander = text => SLANDER.test(plain(text));

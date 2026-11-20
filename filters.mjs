@@ -69,7 +69,7 @@ export const COMPANY = /アサヒ|キリン|サッポロ|サントリー|宝酒�
 export const adultNews = text => (alcohol(text) || tobacco(text)) && !COMPANY.test(String(text || ''));
 /* Politicians, parties, the government, and the papers and broadcasters (who a remark is aimed at). A name
    that is common (小泉, 鈴木) counts only with a title (小泉防衛相, 鈴木大臣) or as a full name. */
-export const POLITICAL_TARGET = /麻生|安倍|岸田|石破|高市|萩生田|二階|枝野|玉木|榛葉|蓮舫|辻元|志位|山本太郎|小泉進次郎|河野太郎|茂木敏充|吉村洋文|橋下徹|小池百合子|野田佳彦|[一-鿿]{1,4}(?:首相|総理|大臣|防衛相|外相|法相|財務相|経産相|厚労相|文科相|国交相|総務相|農水相|環境相|官房長官|幹事長|党首|総裁|議員|知事|市長|元首相|前首相)|政府|政権|内閣|官邸|国会|与党|野党|自民|立憲|立民|維新|公明|共産党|国民民主|参政党|れいわ|社民|保守党|朝日新聞|毎日新聞|読売新聞|産経|日経新聞|NHK|ＮＨＫ|TBS|フジテレビ|テレ朝|日テレ|テレビ東京|マスコミ|マスゴミ|新聞社|共同通信|時事通信|文春|新潮|\b(?:Trump|Biden|Harris|Obama|Clinton|Pelosi|Vance|Newsom|DeSantis|Schumer|McConnell|Netanyahu|Putin|Zelensky|Democrats?|Republicans?|GOP|White House|Congress|Senate|Senator|Governor|President|CNN|Fox News|MSNBC|New York Times|Washington Post)\b/;
+export const POLITICAL_TARGET = /麻生|安倍|岸田|石破|高市|萩生田|二階|枝野|玉木|榛葉|蓮舫|辻元|志位|山本太郎|小泉進次郎|河野太郎|茂木敏充|吉村洋文|橋下徹|小池百合子|野田佳彦|[一-鿿]{1,4}(?:首相|総理|大臣|防衛相|外相|法相|財務相|経産相|厚労相|文科相|国交相|総務相|農水相|環境相|官房長官|幹事長|党首|総裁|議員|知事|市長|元首相|前首相)|政府|政権|内閣|官邸|国会|与党|野党|自民|立憲|立民|維新|公明|共産党|国民民主|参政党|れいわ|社民|保守党|朝日新聞|毎日新聞|読売新聞|産経|日経新聞|NHK|ＮＨＫ|TBS|フジテレビ|テレ朝|日テレ|テレビ東京|マスコミ|マスゴミ|新聞社|共同通信|時事通信|文春|新潮|\b(?:Trump|Biden|Harris|Obama|Clinton|Pelosi|Vance|Newsom|DeSantis|Schumer|McConnell|Netanyahu|Putin|Zelensky|Democrats?|Republicans?|GOP|White House|Congress|Senate|Senator|Governor|President|CNN|Fox News|MSNBC|New York Times|Washington Post|Guardian|BBC|Reuters|legacy media|mainstream media|MSM|government|Parliament|Labour|UKLabour|Tory|Tories|Starmer|Sunak|Farage|Reform UK|propaganda|woke|leftists?|liberals?|conservatives?|Covid|Ukraine|Russia|Kerch|Crimea|Gaza|Israel|Iran|NATO)\b/i;
 /* Words that run a person down or order them about (説明しろや, 辞めろ, 無能, 売国; disgrace, corrupt, resign). */
 export const ATTACK = /酷い|ひどい|最悪|最低|無能|辞めろ|辞任しろ|やめろ|説明しろ|責任取れ|責任とれ|しろや|しろよ|せえや|売国|嘘つき|ウソつき|嘘ばかり|恥を知れ|恥ずかし|情けない|ふざけ|許せない|許さない|ありえない|あり得ない|おかし[いな]|ケチ|バカ|馬鹿|アホ|クズ|老害|税金泥棒|裏切|反日|媚中|媚韓|国賊|害悪|独裁|腐って|腐敗|利権|癒着|無責任|開き直|居直|逃げ[るた]|ダメだ|呆れ|あきれ|失望|茶番|ポンコツ|頑なに|いい加減に|\b(?:stupid|corrupt|liar|lies|lying|disgrace\w*|terrible|worst|failed|incompetent|resign|shame\w*|pathetic|fraud|evil|traitor|clown|idiot\w*|moron\w*|criminal|dictator)\b/i;
 /* politicalTarget: a remark about a politician, a party, the government, a paper or a broadcaster. Left out
@@ -87,6 +87,16 @@ const plain = text => String(text || '').replace(SAYINGS, '');
    to children; a person before the law, allegations, private life. */
 export const CRUEL_EN = /\b(?:kill(?:s|ed|ing|er|ers)?|murder(?:s|ed|er|ers)?|dead|death(?:s)?|died|dies|dying|bod(?:y|ies)|corpse|massacre|slaughter|behead\w*|tortur\w*|execut(?:e|ed|ion|ions)|suicid\w*|stab(?:s|bed|bing)?|shoot(?:s|ing|ings|er)?|shot|gunm(?:a|e)n|gunfire|bomb(?:s|ing|ings|ed)?|blast|rape[ds]?|raping|sexual(?:ly)? (?:assault|abuse)\w*|molest\w*|abus(?:e|ed|es|ing)|traffick\w*|kidnap\w*|hostage(?:s)?|genocide|war crime(?:s)?|casualt(?:y|ies)|wounded|injur(?:ed|ies|y))\b/i;
 export const PERSONAL_EN = /\b(?:arrest(?:s|ed|ing)?|charged|charges|indict\w*|convict\w*|sentenc(?:e|ed|ing)|jail(?:s|ed)?|prison|suspect(?:s|ed)?|accus(?:e|ed|es|ation|ations)|alleg(?:e|ed|es|ation|ations)|scandal(?:s)?|affair|lawsuit|sued|sues|fraud|bribe\w*|harass\w*|probe|investigat\w*|drug(?:s)?|cocaine|cannabis|overdose)\b/i;
+/* Insults and swearing in English (SLANDER covers Japanese). */
+export const SLANDER_EN = /\b(?:fuck\w*|f\*+ck\w*|f\*+\w*|shit\w*|stfu|wtf|bitch\w*|bastard\w*|asshole\w*|dick\w*|cunt\w*|trash|garbage|idiot\w*|moron\w*|stupid|dumb\w*|pedo\w*|scum\w*|clowns?|liars?|pathetic|disgusting|losers?|retard\w*|cringe|ponzi|scam\w*|is a joke|hell)\b/i;
 export const cruel = text => CRUEL.test(plain(text)) || CRUEL_EN.test(String(text || ''));
 export const personal = text => PERSONAL.test(plain(text)) || PERSONAL_EN.test(String(text || ''));
-export const slander = text => SLANDER.test(plain(text));
+export const slander = text => SLANDER.test(plain(text)) || SLANDER_EN.test(String(text || ''));
+/* The second check, made again on every card's words just before it goes into the stock (compose.mjs), after
+   the check made when it was collected: nothing cruel, personal or slanderous, no alcohol or smoking, and
+   nothing about a politician, a party, the government or a paper (from a well-known person's own post: nothing
+   that runs them down). */
+/* What an ordinary person's reply may not do either: run something or somebody down (a well-known person's
+   own post is not held to this). */
+export const NEGATIVE = /最悪|最低|うざ|ウザ|キモ|きもい|気持ち悪|くだらな|つまらな|下手くそ|ヘタクソ|しょうもな|不快|嫌い|ムカつ|むかつ|腹立|ふざけ|ありえな|あり得な|ひどい|酷い|\b(?:fake|staged|pretend\w*|nonsense|worst|sick and tired|hate\w*|sucks?|awful|terrible|horrible|ugly|annoying|boring|overrated|jesus christ|vote|voters?|war|country|done posting|off from X|leav(?:e|ing) X)\b/i;
+export const safeWords = (text, own) => !(cruel(text) || personal(text) || slander(text) || alcohol(text) || tobacco(text) || (own ? politicalAttack(text) : politicalTarget(text) || NEGATIVE.test(String(text || ''))));

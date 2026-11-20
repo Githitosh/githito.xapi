@@ -17,7 +17,7 @@
    reader asked for, the reply alone (replyCard).
 
    Nothing here asks anything of anybody: it reads the files the collectors wrote. */
-import { cruel, personal, slander, alcohol, tobacco, adultNews, politicalTarget, politicalAttack } from './filters.mjs';
+import { cruel, personal, slander, alcohol, tobacco, adultNews, politicalTarget, politicalAttack, safeWords } from './filters.mjs';
 
 /* ---------- who the news is about ---------- */
 /* A card of speed-read news says what happened on its second beat and who did it, said it or showed it on
@@ -357,7 +357,8 @@ export function personCard(p, news) {
     const half = halves(words);
     if (half) { ja = half; how = 'half'; }
   }
-  if (!ja) return null;
+  /* The second check: the whole post and the card's words. */
+  if (!ja || !safeWords(String(p.t), p.own) || !safeWords(ja.join(' ') + ' ' + kw, p.own)) return null;
   return { id: String(p.id), h: p.h, nm: nameOf(p.n, p.h), g: (news && news.g) || p.g || '', at: p.at || p.found || '', kw, ...(tp ? { tp } : {}), ja, how: 'person', cut: how, ...(p.own ? { own: 1 } : {}), f: p.f || 0, l: p.l || 0 };
 }
 /* The same in English (people-en.json): their words in two beats, or their words and "About Brexit". */
@@ -377,7 +378,7 @@ export function personCardEn(p, news) {
     const w = words.split(' ');
     if (w.length >= 5) { const k = Math.ceil(w.length / 2); ja = [w.slice(0, k).join(' '), w.slice(k).join(' ')]; how = 'half'; }
   }
-  if (!ja) return null;
+  if (!ja || !safeWords(String(p.t), p.own) || !safeWords(ja.join(' ') + ' ' + kw, p.own)) return null;
   return { id: String(p.id), h: p.h, nm: nameOf(p.n, p.h), g: (news && news.g) || p.g || '', at: p.at || p.found || '', kw, ...(tp && tp !== 'NEWS' ? { tp } : {}), ja, how: 'person', cut: how, lang: 'en', ...(p.own ? { own: 1 } : {}), f: p.f || 0, l: p.l || 0 };
 }
 

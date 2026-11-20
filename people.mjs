@@ -15,7 +15,7 @@
      node people.mjs --out public [--minutes 4] [--posts 100] [--followers 300] [--likes 5] */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { cruel, personal, slander, alcohol, tobacco, politicalTarget, politicalAttack } from './filters.mjs';
+import { cruel, personal, slander, alcohol, tobacco, politicalTarget, politicalAttack, safeWords } from './filters.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -40,6 +40,9 @@ const MINOR_BIO = /(?:^|[^0-9])1[0-7]\s*(?:歳|才)|高[1-3１-３一二三](?:$
 /* The news whose replies are read: not politics or public safety (what people reply there is one side
    against another). Well-known people's own posts are held to the words only. */
 const NO_GENRE = new Set(['politics', 'safety']);
+/* In English, what people reply under world news is mostly a quarrel: only the replies under sports,
+   entertainment, space and science are read. */
+const LIGHT_EN = new Set(['sports', 'entertainment', 'space', 'science']);
 const POLITICS = /国防|保守党|政党|党首|新党|議会|予算|税金|市長|知事|中国(?!地方|料理|語|茶|四国|山地)|韓国(?!料理|ドラマ|コスメ|語|旅行)|日中|日韓|米中|関係修復|防衛|帰化|国政|政府|政治|国会|安全保障|尖閣|竹島|外国籍|自民|立憲|立民|維新の会|公明|共産党|国民民主|参政党|れいわ|社民|選挙|投票|首相|総理|大臣|議員|政権|内閣|政党|与党|野党|移民|難民|安倍|石破|岸田|高市|トランプ|プーチン|習近平|バイデン/;
 /* English: the same kinds of words. */
 const POLITICS_EN = /\b(?:trump|biden|harris|obama|maga|democrats?|republicans?|gop|election|senator|congressman|congresswoman|white house|liberals?|conservatives?|immigra\w*|israel|gaza|palestin\w*|hamas|netanyahu|putin|zelensky)\b/i;
@@ -52,9 +55,9 @@ const AD = /PR|プロモーション|広告|宣伝|案件|フォローして|RT�
 const THANKS = /記事[をの]?ありがと|取材[をの]?ありがと|インタビュー記事|ありがとうございます/;
 /* The words themselves: no advertisement, quarrel or politics, nothing the other filters leave out. */
 /* (Quarrels are not left out: what people argue about is people's words too. Slander still is.) */
-const wordsOkEn = t => !(politicalTarget(t) || AD_EN.test(t) || POLITICS_EN.test(t) || cruel(t) || personal(t) || slander(t) || alcohol(t) || tobacco(t) || /^[^A-Za-z]*$/.test(t));
+const wordsOkEn = t => safeWords(t, false) && !(politicalTarget(t) || AD_EN.test(t) || POLITICS_EN.test(t) || cruel(t) || personal(t) || slander(t) || alcohol(t) || tobacco(t) || /^[^A-Za-z]*$/.test(t));
 /* (A reply about a politician, a party, the government, a paper or a broadcaster is left out: politicalTarget.) */
-const wordsOk = t => !(politicalTarget(t) || AD.test(t) || THANKS.test(t) || POLITICS.test(t) || cruel(t) || personal(t) || slander(t) || alcohol(t) || tobacco(t) || /^[^ぁ-ヿ一-鿿]*$/.test(t));
+const wordsOk = t => safeWords(t, false) && !(politicalTarget(t) || AD.test(t) || THANKS.test(t) || POLITICS.test(t) || cruel(t) || personal(t) || slander(t) || alcohol(t) || tobacco(t) || /^[^ぁ-ヿ一-鿿]*$/.test(t));
 const tidy = t => String(t || '').replace(/^(?:\s*[@＠][A-Za-z0-9_]+)+/, '').replace(/https?:\/\/\S+/g, ' ').replace(/[#＃][^\s#＃]+/g, ' ').replace(/[─-▟]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 async function conversation(id) {
@@ -157,12 +160,12 @@ async function gather(lang, posts, minutes) {
   const politics = lang === 'en' ? POLITICS_EN : POLITICS;
   /* (A reply under news that is politics or public safety is left out too, whenever it was kept.) */
   const headOf = new Map((Array.isArray(news.heads) ? news.heads : []).map(x => [String(x.id), x]));
-  const underOk = p => { const x = p.on && headOf.get(String(p.on)); return !x || (!NO_GENRE.has(x.g) && !politics.test(x.t + ' ' + (x.d || ''))); };
+  const underOk = p => { const x = p.on && headOf.get(String(p.on)); return !x || (!NO_GENRE.has(x.g) && (lang !== 'en' || LIGHT_EN.has(x.g)) && !politics.test(x.t + ' ' + (x.d || ''))); };
   const people = (Array.isArray(before.people) ? before.people : []).filter(p => p && p.id && p.t && fresh(p.found) && (p.own ? famousOk(p.t) : ok(p.t) && underOk(p)));
   const have = new Set(people.map(p => p.id));
   /* The most answered news of the last day, not read in the last two days, politics and safety left out. */
   const heads = (Array.isArray(news.heads) ? news.heads : [])
-    .filter(x => x && x.id && !read[x.id] && Date.now() - Date.parse(x.found || x.at || 0) < 24 * 3600e3 && (Number(x.rc) || 0) >= 1 && !NO_GENRE.has(x.g) && !politics.test(x.t + ' ' + (x.d || '')) && !cruel(x.t) && !personal(x.t))
+    .filter(x => x && x.id && !read[x.id] && Date.now() - Date.parse(x.found || x.at || 0) < 24 * 3600e3 && (Number(x.rc) || 0) >= 1 && !NO_GENRE.has(x.g) && (lang !== 'en' || LIGHT_EN.has(x.g)) && !politics.test(x.t + ' ' + (x.d || '')) && !cruel(x.t) && !personal(x.t))
     .sort((a, b) => (Number(b.rc) || 0) - (Number(a.rc) || 0)).slice(0, posts);
   /* Well-known people's own words first, then what people replied under the news. */
   const famousRead = Object.fromEntries(Object.entries(before.famousRead || {}).filter(([, at]) => fresh(at)));

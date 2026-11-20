@@ -1,3 +1,5 @@
+/* The cards are written to githito.xapi's principles (PRINCIPLES.md): enjoyable and light, no advertising, no
+   slander, nothing that upsets anyone, even-handed. */
 /* compose.mjs: the words of every card, written here and checked here, so that the pages only read them.
 
    News (speed-read news, a card in three beats): a keyword, then what happened, then who did it, said it
@@ -17,7 +19,7 @@
    reader asked for, the reply alone (replyCard).
 
    Nothing here asks anything of anybody: it reads the files the collectors wrote. */
-import { cruel, personal, slander, alcohol, tobacco, adultNews, politicalTarget, politicalAttack, safeWords } from './filters.mjs';
+import { cruel, personal, slander, alcohol, tobacco, adultNews, politicalTarget, politicalAttack, safeWords, advert } from './filters.mjs';
 
 /* ---------- who the news is about ---------- */
 /* A card of speed-read news says what happened on its second beat and who did it, said it or showed it on
@@ -512,7 +514,8 @@ export function talkCards(s) {
   const m = [];
   for (const [k, x] of msgs.entries()) {
     const full = tidyTalk(x.x);
-    if (!full || slander(full) || cruel(full) || alcohol(full) || tobacco(full)) return null;
+    /* (Reply News is for enjoying replies: nothing that runs anyone down, and no advertising. PRINCIPLES.md) */
+    if (!full || slander(full) || cruel(full) || alcohol(full) || tobacco(full) || advert(full)) return null;
     /* A message too short to take a part from (な！) leaves the talk out: its first beat would be the whole. */
     const first = excerptOf(full);
     if (!first) return null;

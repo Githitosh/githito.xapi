@@ -1,3 +1,7 @@
+/* githito.xapi is a place to enjoy replies and to watch the news lightly (PRINCIPLES.md): no fear of being
+   swayed by advertising, not a place for slander, nothing that upsets anyone, even-handed. When in doubt, a
+   thing is left out. This file is what is never shown; it is checked when a thing is collected and again just
+   before a card is stocked (safeWords), and the pages check once more (news-shorts src/never.js). */
 /* githito.xapi: what is never published, whatever the pages' own switches say.
 
    Three lists, used by news.mjs (headlines and replies) and humor.mjs (the Reply News stories). The
@@ -99,4 +103,8 @@ export const slander = text => SLANDER.test(plain(text)) || SLANDER_EN.test(Stri
 /* What an ordinary person's reply may not do either: run something or somebody down (a well-known person's
    own post is not held to this). */
 export const NEGATIVE = /最悪|最低|うざ|ウザ|キモ|きもい|気持ち悪|くだらな|つまらな|下手くそ|ヘタクソ|しょうもな|不快|嫌い|ムカつ|むかつ|腹立|ふざけ|ありえな|あり得な|ひどい|酷い|\b(?:fake|staged|pretend\w*|nonsense|worst|sick and tired|hate\w*|sucks?|awful|terrible|horrible|ugly|annoying|boring|overrated|jesus christ|vote|voters?|war|country|done posting|off from X|leav(?:e|ing) X)\b/i;
-export const safeWords = (text, own) => !(cruel(text) || personal(text) || slander(text) || alcohol(text) || tobacco(text) || (own ? politicalAttack(text) : politicalTarget(text) || NEGATIVE.test(String(text || ''))));
+export const safeWords = (text, own) => !(cruel(text) || personal(text) || slander(text) || alcohol(text) || tobacco(text) || ADVERT.test(String(text || '')) || (own ? politicalAttack(text) : politicalTarget(text) || NEGATIVE.test(String(text || ''))));
+/* Advertising (principle 2): promotions, sponsored posts, PR, and calls to buy, order, sign up or enter.
+   Nobody's post is shown with them, well-known people's own posts included. */
+export const ADVERT = /#PR\b|＃PR|【PR】|［PR］|\[PR\]|〈PR〉|\bPR\b|広告|宣伝|案件|タイアップ|プロモーション|スポンサー|アフィリエイト|楽天ROOM|購入はこちら|ご購入|お買い求め|予約はこちら|ご予約|予約受付|予約開始|発売中|発売しました|発売開始|好評発売|販売中|ご注文|通販|グッズ|クーポン|割引|[0-9０-９]+[%％]\s*(?:オフ|OFF|off)|セール|期間限定|今だけ|キャンペーン|応募|抽選で|当選|フォロー[&＆]\s*(?:RT|リポスト)|リポストで|詳しくはプロフ|プロフのリンク|リンクから|LINEスタンプ|BuyPR|\b(?:ad|ads|#ad|sponsored|promo|promotion|partnered|partnership|use code|discount|sale|buy now|shop now|order now|pre-?orders?|link in bio|out now|on sale|available now|giveaway|subscribe|merch|affiliate|coupon)\b/i;
+export const advert = text => ADVERT.test(String(text || ''));

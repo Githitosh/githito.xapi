@@ -15,7 +15,7 @@
      node people.mjs --out public [--minutes 4] [--posts 100] [--followers 300] [--likes 5] */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { cruel, personal, slander, alcohol, tobacco, politicalTarget, politicalAttack, safeWords } from './filters.mjs';
+import { cruel, personal, slander, alcohol, tobacco, politicalTarget, politicalAttack, safeWords, advert } from './filters.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -111,7 +111,8 @@ async function ownPosts(handle) {
 /* Well-known people's own words are not held to the topic filters (politics, advertisement): what they post
    is said in public under their own name. Only what is never shown is left out: cruel, personal, slander,
    and alcohol and smoking (the pages are read by the young too). */
-const famousOk = t => !(cruel(t) || personal(t) || slander(t) || alcohol(t) || tobacco(t) || politicalAttack(t));
+/* (Advertising is left out of their posts too: principle 2 of PRINCIPLES.md.) */
+const famousOk = t => !(cruel(t) || personal(t) || slander(t) || alcohol(t) || tobacco(t) || politicalAttack(t) || advert(t));
 async function famous(lang, people, have, readAt, notThem, minutes) {
   const ok = famousOk;
   /* Those read longest ago first; an account found not to be the person waits a week. */

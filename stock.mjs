@@ -102,6 +102,8 @@ async function main() {
   const oldNews = await readJson(path.join(OUT, 'v1', 'stock-news-ja.json'), {});
   const oldHumor = await readJson(path.join(OUT, 'v1', 'stock-humor-ja.json'), {});
   const made = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+  /* githito.xapi's principles (PRINCIPLES.md), sent with the stock so that whoever reads the files reads them too. */
+  const principles = ['A place to enjoy replies and to watch the news lightly.', 'No fear of being swayed by advertising: no ads, promotions or calls to buy.', 'Not a place for slander: nothing that hurts or runs people down, no attacks on politicians, parties, the government or the media.', 'Nothing that upsets anyone: no cruel news, nothing about one person\'s honour or private life, no alcohol or smoking.', 'Even-handed. When in doubt, a thing is left out.'];
   const asked = Array.isArray(news.asked) ? news.asked : [];
   let changed = false;
 
@@ -133,7 +135,7 @@ async function main() {
     .sort((x, y) => ((y.own || 0) - (x.own || 0)) || (x.own ? y.l - x.l : time(y) - time(x)));
   if (said.length) {
     const d = deal(said, oldNews.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 3 });
-    const file = { version: 2, lang: 'ja', made, size: SIZE, cards: said.concat(cards.filter(c => c.q)), videos: d.videos, replies, asked };
+    const file = { version: 2, lang: 'ja', made, principles, size: SIZE, cards: said.concat(cards.filter(c => c.q)), videos: d.videos, replies, asked };
     if (await save('stock-news-ja.json', file)) changed = true;
     const cuts = {}; said.forEach(c => { cuts[c.cut] = (cuts[c.cut] || 0) + 1; });
     console.log(`News: ${said.length} cards of what people said ${JSON.stringify(cuts)} (${how && Object.keys(how).length ? 'the papers\' headlines are not shown' : ''}); videos: ${d.videos.length} (${d.made} new, ${d.kept} kept), ${d.waiting} cards wait for the next video; ${replies.length} replies to asked accounts.`);
@@ -147,7 +149,7 @@ async function main() {
   const saidEn = (Array.isArray(pplEn.people) ? pplEn.people : []).map(p => personCardEn(p, headEn.get(String(p.on)))).filter(Boolean).sort((x, y) => ((y.own || 0) - (x.own || 0)) || (x.own ? y.l - x.l : time(y) - time(x)));
   if (saidEn.length) {
     const d = deal(saidEn, oldEn.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 3 });
-    const file = { version: 2, lang: 'en', made, size: SIZE, cards: saidEn, videos: d.videos };
+    const file = { version: 2, lang: 'en', made, principles, size: SIZE, cards: saidEn, videos: d.videos };
     if (await save('stock-news-en.json', file)) changed = true;
     console.log(`News in English: ${saidEn.length} cards of what people said; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept).`);
   } else console.log('News in English: nobody\'s words yet.');
@@ -196,7 +198,7 @@ async function main() {
     const videos = kept.concat(made).sort((x, y) => (Math.round((y.g || 0) * 2) - Math.round((x.g || 0) * 2)) || ((Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0))).slice(0, MAX);
     const inVideos = new Set(videos.flatMap(v => v.c));
     const shown = talks.filter(t => inVideos.has(t.i)).concat(talks.filter(t => !inVideos.has(t.i)).slice(0, 100));
-    const file = { version: 2, lang: 'ja', made, size: SIZE, talks: shown, videos, replies, asked };
+    const file = { version: 2, lang: 'ja', made, principles, size: SIZE, talks: shown, videos, replies, asked };
     if (await save('stock-humor-ja.json', file)) changed = true;
     const msgs = {}; talks.forEach(t => { msgs[t.m.length] = (msgs[t.m.length] || 0) + 1; });
     const gl = [0, 1, 2].map(g => talks.filter(t => t.gl === g).length);

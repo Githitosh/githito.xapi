@@ -19,6 +19,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { CJK, plain, talkPost, pickReplies, stamp, readJson, writeApi, writeIndex, young, readEmbed, genreOf } from './rules.mjs';
+import { countRequest, tidy, LIMIT } from './limit.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -80,6 +81,22 @@ async function openIssues() {
   return list.filter(i => !i.pull_request && i.user && i.user.login === OWNER && /^\s*(?:talk|account)\b/i.test(i.title || '')).reverse();
 }
 
+/* ---------- too many requests from one place ---------- */
+/* See limit.mjs: more than a few requests from one sender in an hour (or many in a day) and that sender's
+   requests are not taken for some hours. The counts live in v1/requests.json. */
+let REQUESTS = null;
+async function requestTaken(sender) {
+  if (!REQUESTS) REQUESTS = await readJson(path.join(OUT, 'v1', 'requests.json'), { version: 1, senders: {} });
+  return countRequest(REQUESTS, sender);
+}
+async function saveRequests() {
+  if (!REQUESTS || DRY) return;
+  const file = path.join(OUT, 'v1', 'requests.json');
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify({ version: 1, updated: stamp(), limit: LIMIT, senders: tidy(REQUESTS).senders }, null, 1) + '\n');
+  await writeFile(path.join(OUT, '.changed'), stamp() + '\n');
+}
+
 /* ---------- the accounts whose replies may play ---------- */
 const MAX_ACCOUNTS = 8;
 const NAME = /^[A-Za-z0-9_]{1,15}$/;
@@ -119,11 +136,25 @@ async function main() {
   }
   const added = {};
   for (const job of jobs) {
+    /* A request that came as an issue is counted for its sender; too many, and none is taken for a while. */
+    if (job.number) {
+      const sender = (job.user && job.user.login) || OWNER;
+      const v = await requestTaken(sender);
+      if (!v.ok) {
+        const note = `Too many requests in a short time: none is taken from @${sender} until ${v.until} (UTC). What was set before stays as it was.\n\n短い時間に多くの依頼が届いたため、${v.until}（UTC）まで @${sender} からの受け付けを止めています。設定はそのままです。`;
+        console.log('#' + job.number + ' ' + note.split('\n')[0]);
+        if (!DRY) {
+          await gh('POST', `/repos/${REPO}/issues/${job.number}/comments`, { body: note });
+          await gh('PATCH', `/repos/${REPO}/issues/${job.number}`, { state: 'closed' });
+        }
+        continue;
+      }
+    }
     if (/^\s*account\b/i.test(job.title || '')) {
       const names = accountsFrom(job.body);
       await setAccounts(names);
       const note = names.length
-        ? `The News page may play the replies to: @${names.join(', @')}. Their posts and the replies under them are read from the next run (every half hour).`
+        ? `The News page may play the replies to: @${names.join(', @')}. Their posts and the replies under them are read from the next run (every half hour), through the same filters as everything else (nothing cruel, nothing against a person, no slander; for an account that is not a paper also nothing of politics or of groups of people), and one account gives a few posts, not its whole timeline.`
         : 'No account: the News page plays no replies.';
       console.log('#' + job.number + ' ' + note);
       if (job.number && !DRY) {
@@ -143,6 +174,7 @@ async function main() {
       await gh('PATCH', `/repos/${REPO}/issues/${job.number}`, { state: 'closed' });
     }
   }
+  await saveRequests();
   if (DRY || !Object.keys(added).length) return;
   const outs = [];
   for (const lang of Object.keys(added)) {

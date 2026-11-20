@@ -293,6 +293,16 @@ function headGenre(account, text, lang) {
   if (CRIME.test(text)) return 'safety';
   return genreFor(account, text, lang);
 }
+/* An account somebody asked for (sent as an issue) that is not a paper. Its posts are held to an even hand
+   as well as to the lists of filters.mjs, so that what one reader sends cannot tilt the page: nothing of
+   politics or of groups of people, no quarrel or blame, nothing grave, no advertising, nothing X marks as
+   sensitive, and nothing from an account that is protected or that speaks of being under age. */
+function askedPostOk(text, st) {
+  if (st && (st.possibly_sensitive || (st.author && st.author.protected))) return false;
+  return !slander(text) && !NASTY.test(text) && !UNKIND.test(text) && !GROUPS.test(text) && !STATE.test(text) && !GRAVE.test(text) && !SPAM.test(text);
+}
+/* How much of the page one asked account may take: new headlines in a run, and headlines kept in the file. */
+const ASKED = { perRun: 5, keep: 20 };
 function headOk(text, headline) {
   if (!headline || charLen(headline) < 10 || (openBracket(headline) && !/…$/.test(headline))) return false;
   if ((headline.match(/[぀-ヿ一-鿿]/g) || []).length < 5) return false;
@@ -351,7 +361,8 @@ function newsPlay(items, news, heads) {
   const tag = (list, t) => list.map(x => t + x.id);
   const replies = spread(lean(items, x => (news[x.n] && news[x.n].at) || x.at, 24), x => ['n' + x.n, 'p' + String(x.h).toLowerCase()], 20);
   /* News is for the newest: a headline's place is its age and a draw of up to three hours, no more. */
-  const headOrder = spread(lean(heads, x => x.at || x.found, 3), x => ['l' + squash(x.t).slice(0, 12)], 30);
+  /* Then no account twice within three places: a video of ten has at most four from one account. */
+  const headOrder = spread(spread(lean(heads, x => x.at || x.found, 3), x => ['l' + squash(x.t).slice(0, 12)], 30), x => ['s' + String(x.h).toLowerCase()], 2);
   const apart = list => spread(list, x => ['s' + x.h], 3);
   const genre = {};
   GENRES.forEach(g => {
@@ -493,8 +504,9 @@ async function build(lang) {
   /* The others: the rest of the table and the headline-only accounts that are not among the main ones. */
   const otherHeads = shuffle(everyAccount.map(a => a[0]).filter(h => !asked.has(h.toLowerCase()) && !mainHeads.includes(h))).sort((x, y) => lastRead(x) - lastRead(y));
   const queue = askedList.concat(shuffle(mainHeads)).concat(otherHeads).slice(0, askedList.length + CONF.headSearches).map(handle => ({ handle, tries: 0 }));
-  /* With replies to read (accounts asked for) the headlines take three fifths of the time; otherwise nearly all of it. */
-  const headUntil = deadline - (askedList.length ? CONF.minutes * 24e3 : 30e3);
+  /* With replies to read (accounts asked for) the headlines take four fifths of the time, so that what
+     was asked for does not take the run from the news of everybody; otherwise nearly all of it. */
+  const headUntil = deadline - (askedList.length ? CONF.minutes * 12e3 : 30e3);
   const wayRest = { timeline: 0, search: 0 };
   const refusedTimes = { timeline: 0, search: 0 };
   const wayOpen = w => Date.now() >= wayRest[w];
@@ -505,13 +517,20 @@ async function build(lang) {
     const own = !newsAccount.has(handle.toLowerCase());
     const shown = list.find(st => handleOf(st).toLowerCase() === handle.toLowerCase() && st.author && st.author.name);
     if (own && shown) a[1] = String(shown.author.name).slice(0, 30);
+    /* An account asked for that speaks of being under age is read for nothing. */
+    const minor = own && !!shown && MINOR_BIO.test(String(shown.author.description || '') + ' ' + String(shown.author.name || ''));
+    if (minor) console.log(`  @${handle}: asked for, but its profile speaks of being under age: nothing is taken`);
     list.forEach(st => {
       const id = statusId(st);
       if (!id || handleOf(st).toLowerCase() !== handle.toLowerCase() || parentOf(st).id) return;
       const text = String(st.text || '');
       const headline = headlineOf(text);
+      /* Held to an even hand (askedPostOk): such a post is no headline, and no replies are read under it. */
+      if (own && (minor || !askedPostOk(text, st))) return;
       posts.push({ id, a, text, headline, replies: Number(st.replies) || 0, at: whenOf(st) });
       if (haveHead.has(id) || !headOk(text, headline)) return;
+      /* One asked account gives a few headlines a run, not its whole timeline. */
+      if (own && got >= ASKED.perRun) return;
       haveHead.add(id);
       const detail = detailOf(text, headline);
       newHeads.push({ id, h: a[0], n: a[1], t: headline, ...(detail ? { d: detail } : {}), g: headGenre(a, text, lang), at: whenOf(st), rc: Number(st.replies) || 0, found: stamp(), ...(own ? { q: 1 } : {}) });
@@ -717,10 +736,13 @@ async function build(lang) {
   /* The headlines: this run's and the earlier ones that are still young, newest first, no line twice. */
   const headFresh = x => Date.now() - Date.parse(x.found || 0) < CONF.headHours * 3600e3;
   const headSeen = new Set();
+  const askedKept = new Map();
   const rcNow = new Map(posts.map(p => [p.id, p.replies]));
-  const heads = newHeads.concat(oldHeads.filter(x => headFresh(x) && headOk(x.t + ' ' + (x.d || ''), x.t)).map(x => ({ ...x, g: headGenre(anyHandle.get(String(x.h).toLowerCase()), x.t, lang), rc: rcNow.has(x.id) ? rcNow.get(x.id) : (Number(x.rc) || 0) })))
+  const heads = newHeads.concat(oldHeads.filter(x => headFresh(x) && headOk(x.t + ' ' + (x.d || ''), x.t) && (!x.q || askedPostOk(x.t + ' ' + (x.d || '')))).map(x => ({ ...x, g: headGenre(anyHandle.get(String(x.h).toLowerCase()), x.t, lang), rc: rcNow.has(x.id) ? rcNow.get(x.id) : (Number(x.rc) || 0) })))
     .sort((x, y) => (Date.parse(y.at || y.found || 0) || 0) - (Date.parse(x.at || x.found || 0) || 0))
     .filter(x => { const k = squash(x.t).slice(0, 24); if (headSeen.has(k)) return false; headSeen.add(k); return true; })
+    /* An asked account that is no paper keeps its newest few, so it cannot fill the file. */
+    .filter(x => { if (!x.q) return true; const k = String(x.h).toLowerCase(); askedKept.set(k, (askedKept.get(k) || 0) + 1); return askedKept.get(k) <= ASKED.keep; })
     .slice(0, CONF.headKeep);
   /* The headlines in English too, for the card (the newest first; those done in earlier runs keep theirs). */
   if (!flag('no-translate')) {

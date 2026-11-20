@@ -38,6 +38,7 @@ const clock = ms => { const j = japan(ms); return `${j.day} ${j.hour}:${String(j
 async function record() {
   const humor = await readJson(path.join(OUT, 'v1', 'humor-ja.json'), {});
   const news = await readJson(path.join(OUT, 'v1', 'news-ja.json'), {});
+  const people = await readJson(path.join(OUT, 'v1', 'people-ja.json'), {});
   const file = path.join(OUT, 'v1', 'stats.json');
   const before = await readJson(file, {});
   const now = Date.now();
@@ -58,7 +59,8 @@ async function record() {
     }
   };
   tally(humor.stories, 'humor');
-  tally(news.heads, 'news');
+  /* News intake is the memo accounts' own posts (people.mjs), plus any headline still kept. */
+  tally([...(Array.isArray(news.heads) ? news.heads : []), ...((Array.isArray(people.people) ? people.people : []).filter(p => p && p.own))], 'news');
   tally(news.items, 'replies');
   /* What this very run did: a part ran in it when its file was written after the run began. */
   const started = Number(process.env.STARTED) * 1000 || 0;

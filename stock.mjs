@@ -5,13 +5,15 @@
    posts leave the collection files (those files keep a few days; the stock the pages play keeps growing).
 
      v1/stock-news-ja.json   News: cards { id, h, n, g, at, kw, ja: [what, who], how, q? }
-     v1/stock-news-en.json   News in English: cards written from English news (english.mjs; nothing translated)
+     v1/stock-news-en.json   News in English: cards from the private memo's English accounts (nothing translated)
      v1/stock-humor-ja.json  Reply News: talks { i, k, at, s, gl, m: [{ i, h, to, ja: [part, whole] }] }
                              (a talk is a conversation; a message is a card)
      both: videos [{ i, at, c: [card or talk ids], m? }], replies (to the accounts readers asked for), asked
 
-   News is made of people's own words (people.mjs): no paper or broadcaster is on its cards. The news posts
-   are read only to find what people say under them.
+   News cards are the private memo's accounts only (news-famous.json, read by people.mjs). When that
+   file is read, a card whose account is not in it is dropped and is not refilled. When the file is
+   missing, the news stock is left as it is (no built-in list is used in its place). Humor is not
+   touched. Memo cards, and the videos made of them, keep accumulating.
 
    The pages read these files and nothing else: they make no words of their own. A reader's page plays the
    newest video it has not played, or picks among the cards when the reader chose genres or words.
@@ -21,6 +23,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { newsCard, talkCards, replyCard, personCard, personCardEn } from './compose.mjs';
+import { newsAccounts } from './news-accounts.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -51,10 +54,11 @@ function mergeStock(oldItems, freshItems, idOf) {
 }
 const cardKeep = c => c && c.id != null && Array.isArray(c.ja) && c.ja[0] && c.ja[1];
 const talkKeep = t => t && t.i != null && Array.isArray(t.m) && t.m.length >= 2 && t.m.every(x => x && Array.isArray(x.ja) && x.ja[0] && x.ja[1]);
-/* This run's cards, plus every card the stock already held. Own words first, then the newest. */
-function peopleCards(fresh, oldCards) {
-  const carried = (Array.isArray(oldCards) ? oldCards : []).filter(c => cardKeep(c) && !c.q);
-  const merged = mergeStock(carried, fresh, c => c.id);
+/* This run's cards, plus every card the stock already held, when allow says the account may stay.
+   Own words first, then the newest. A card allow refuses is not carried and not added. */
+function peopleCards(fresh, oldCards, allow) {
+  const carried = (Array.isArray(oldCards) ? oldCards : []).filter(c => cardKeep(c) && !c.q && allow(c));
+  const merged = mergeStock(carried, fresh.filter(allow), c => c.id);
   const said = merged.items.sort((x, y) => ((y.own || 0) - (x.own || 0)) || (x.own ? (Number(y.l) || 0) - (Number(x.l) || 0) : time(y) - time(x)));
   return { said, added: merged.added, carried: merged.carried };
 }
@@ -137,6 +141,10 @@ async function main() {
   /* githito.xapi's principles (PRINCIPLES.md), sent with the stock so that whoever reads the files reads them too. */
   const principles = ['A place to enjoy replies and to watch the news lightly.', 'No fear of being swayed by advertising: no ads, promotions or calls to buy.', 'Not a place for slander: nothing that hurts or runs people down, no attacks on politicians, parties, the government or the media.', 'Nothing that upsets anyone: no cruel news, nothing about one person\'s honour or private life, no alcohol or smoking.', 'Even-handed. When in doubt, a thing is left out.'];
   const asked = Array.isArray(news.asked) ? news.asked : [];
+  const memo = await newsAccounts(opt('memo', process.env.XAPI_MEMO_DIR || ''));
+  /* No built-in list. A missing file allows nobody new; the stock already on disk is left for the
+     next run that can read the file, which drops every card that is not in it. */
+  const allow = c => !!c && memo.handles.has(String(c.h || '').replace(/^@+/, '').toLowerCase());
   let changed = false;
 
   /* The replies to the accounts readers asked for: a card each, the newest first. */
@@ -156,36 +164,40 @@ async function main() {
     cards.push(c);
   }
   cards.sort((x, y) => time(y) - time(x));
-  /* News: what people said (people.mjs), a person a card. Videos of ten, nobody twice, a genre at most
-     four times. Cards and videos already in the stock stay; this run's posts are added. A post of an
-     account a reader asked for (q) plays for that reader only. */
+  /* News: the memo accounts' own posts (people.mjs). Videos of ten, nobody twice, a genre at most four
+     times. A card already in the stock stays when its account is still in the memo; any other news card
+     is dropped and is not refilled. */
   const pplFile = await readJson(path.join(OUT, 'v1', 'people-ja.json'), {});
   const headById = new Map(heads.map(x => [String(x.id), x]));
   const freshSaid = (Array.isArray(pplFile.people) ? pplFile.people : []).map(p => personCard(p, headById.get(String(p.on)))).filter(Boolean);
-  const { said, added, carried } = peopleCards(freshSaid, oldNews.cards);
-  const askedCards = mergeStock((Array.isArray(oldNews.cards) ? oldNews.cards : []).filter(c => c && c.q && cardKeep(c)), cards.filter(c => c.q), c => c.id).items;
-  if (said.length) {
+  if (memo.missing) console.log('News: news-famous.json is missing, so no news account is collected and the news stock is left as it is.');
+  else {
+    const { said, added, carried } = peopleCards(freshSaid, oldNews.cards, allow);
+    const askedCards = mergeStock((Array.isArray(oldNews.cards) ? oldNews.cards : []).filter(c => c && c.q && cardKeep(c) && allow(c)), cards.filter(c => c.q && allow(c)), c => c.id).items;
+    const dropped = (Array.isArray(oldNews.cards) ? oldNews.cards : []).filter(c => cardKeep(c) && !allow(c)).length;
     const d = deal(said, oldNews.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 3 });
     const file = { version: 2, lang: 'ja', made, principles, size: SIZE, cards: said.concat(askedCards), videos: d.videos, replies, asked };
     if (await save('stock-news-ja.json', file)) changed = true;
     const cuts = {}; said.forEach(c => { cuts[c.cut] = (cuts[c.cut] || 0) + 1; });
-    console.log(`News: ${said.length} cards of what people said (${added} added this run, ${carried} already in the stock) ${JSON.stringify(cuts)}; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept), ${d.waiting} cards wait for the next video; ${replies.length} replies to asked accounts.`);
-  } else console.log('News: nobody\'s words yet.');
+    console.log(`News: ${said.length} cards from the memo accounts (${added} added this run, ${carried} already in the stock) ${JSON.stringify(cuts)}; ${dropped} cards from other accounts dropped; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept), ${d.waiting} cards wait for the next video; ${replies.length} replies to asked accounts.`);
+  }
 
-  /* News in English: what people said under English news (people-en.json), in English as written.
-     The same stock: this run adds, and what was already collected stays. */
+  /* News in English: the memo's English accounts (people-en.json), in English as written.
+     The same rule: memo cards accumulate, and every other news card is dropped. */
   const newsEn = await readJson(path.join(OUT, 'v1', 'news-en.json'), {});
   const oldEn = await readJson(path.join(OUT, 'v1', 'stock-news-en.json'), {});
   const pplEn = await readJson(path.join(OUT, 'v1', 'people-en.json'), {});
   const headEn = new Map((Array.isArray(newsEn.heads) ? newsEn.heads : []).map(x => [String(x.id), x]));
   const freshEn = (Array.isArray(pplEn.people) ? pplEn.people : []).map(p => personCardEn(p, headEn.get(String(p.on)))).filter(Boolean);
-  const en = peopleCards(freshEn, oldEn.cards);
-  if (en.said.length) {
-    const d = deal(en.said, oldEn.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 3 });
-    const file = { version: 2, lang: 'en', made, principles, size: SIZE, cards: en.said, videos: d.videos };
-    if (await save('stock-news-en.json', file)) changed = true;
-    console.log(`News in English: ${en.said.length} cards of what people said (${en.added} added this run, ${en.carried} already in the stock); videos: ${d.videos.length} (${d.made} new, ${d.kept} kept).`);
-  } else console.log('News in English: nobody\'s words yet.');
+  if (memo.missing) console.log('News in English: news-famous.json is missing, so the English news stock is left as it is.');
+  else {
+    const en = peopleCards(freshEn, oldEn.cards, allow);
+    const droppedEn = (Array.isArray(oldEn.cards) ? oldEn.cards : []).filter(c => cardKeep(c) && !allow(c)).length;
+    const enDeal = deal(en.said, oldEn.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 3 });
+    const enFile = { version: 2, lang: 'en', made, principles, size: SIZE, cards: en.said, videos: enDeal.videos };
+    if (await save('stock-news-en.json', enFile)) changed = true;
+    console.log(`News in English: ${en.said.length} cards from the memo accounts (${en.added} added this run, ${en.carried} already in the stock); ${droppedEn} cards from other accounts dropped; videos: ${enDeal.videos.length} (${enDeal.made} new, ${enDeal.kept} kept).`);
+  }
 
   /* Reply News: a video is conversations, whole, about ten messages: greetings said with love first, then
      the longest talks; nobody in two talks of one video; in each video the talks follow the day (good

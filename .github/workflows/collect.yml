@@ -152,6 +152,12 @@ jobs:
         env:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node news.mjs --out public ${{ inputs.searches && format('--searches {0}', inputs.searches) || '' }}
+      # The video stock (stock.mjs): the words of every card written and checked (compose.mjs), and the cards
+      # dealt into videos of ten, about a hundred kept. The pages read these files only.
+      - name: Cards and the video stock
+        if: ${{ always() }}
+        continue-on-error: true
+        run: node stock.mjs --out public
       # How much each hour took in (stats.mjs): v1/stats.json and the graph v1/intake.svg (the README shows it),
       # and on this run's own page the graph, this run's numbers and a table with a bar for each hour.
       - name: Intake graph

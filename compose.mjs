@@ -17,7 +17,7 @@
    reader asked for, the reply alone (replyCard).
 
    Nothing here asks anything of anybody: it reads the files the collectors wrote. */
-import { cruel, personal, slander } from './filters.mjs';
+import { cruel, personal, slander, alcohol } from './filters.mjs';
 
 /* ---------- who the news is about ---------- */
 /* A card of speed-read news says what happened on its second beat and who did it, said it or showed it on
@@ -287,7 +287,15 @@ export function excerptOf(text) {
   /* (Not a loving word said the other way: 好きではなかった, かわいくない.) */
   let x = grab(GREET) || grab(/(?:大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|愛してる|あいしてる|会いたい|あいたい|ぎゅー+|ちゅー+|なでなで|よしよし|かわいい|可愛い|かっこいい|嬉しい|うれしい|好き|すき|しゅき)(?!では|じゃ|じゃな|くな|にな[れら]な)/);
   if (!x) x = (plain.split(/[。、！？!?\s]+/).find(p => len(p) >= 2) || '').trim();
-  if (len(x) > 10) x = keyword(x);
+  /* A long first phrase: its first words, as the dictionary divides them, up to nine letters (痩せても落ちない),
+     not a piece cut out of a word (せても). */
+  if (len(x) > 10) {
+    let words = [];
+    try { words = [...new Intl.Segmenter('ja', { granularity: 'word' }).segment(x)].map(w => w.segment); } catch (e) { words = []; }
+    let out = '';
+    for (const w of words) { if (len(out + w) > 9) break; out += w; }
+    x = len(out.trim()) >= 2 ? out.trim() : keyword(x);
+  }
   return [...(x || keyword(plain) || '')].slice(0, 10).join('');
 }
 /* A conversation: its messages in order, each a card { i (the post's number), h (who wrote it), to (whom
@@ -299,7 +307,7 @@ export function talkCards(s) {
   const m = [];
   for (const [k, x] of msgs.entries()) {
     const full = tidyTalk(x.x);
-    if (!full || slander(full) || cruel(full)) return null;
+    if (!full || slander(full) || cruel(full) || alcohol(full)) return null;
     m.push({ i: String(x.i || ''), h: x.h, ...(k ? { to: msgs[k - 1].h } : {}), ja: [excerptOf(full), full] });
   }
   if (m.length < 2 || m[0].h === m[1].h) return null;
@@ -312,7 +320,7 @@ export function talkCards(s) {
 export function replyCard(x, post) {
   if (!x || !x.id || !post) return null;
   const r = tidyTalk(x.t);
-  if (!r || slander(r) || cruel(r)) return null;
+  if (!r || slander(r) || cruel(r) || alcohol(r)) return null;
   const on = fixPart(len(post.t) > 30 ? shorten(tidyNews(post.t), 30) || tidyNews(post.t) : tidyNews(post.t));
   return { id: String(x.id), ask: post.h, at: x.at || '', a: { h: post.h, i: String(x.n) }, b: { h: x.h, i: String(x.id) }, kw: excerptOf(r), ja: [excerptOf(r), r], on };
 }

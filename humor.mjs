@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { stamp, readJson, charLen, cleanText, readFixupX } from './rules.mjs';
 import { lean, spread, deal } from './pick.mjs';
-import { slander } from './filters.mjs';
+import { slander, alcohol } from './filters.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -174,7 +174,8 @@ function romanceText(st, lang) {
   const bio = String(a.description || a.bio || '') + ' ' + String(a.name || '');
   if (!text || !cleanText(text) || UNSAFE_ROMANCE.test(text) || YOUTH.test(text) || AGE.test(text) || EMOJI_HINT.test(text) || MOURN.test(text)) return '';
   if (lang !== 'en' && (POLITE.test(text) || /[ｦ-ﾟ]{2,}/.test(text))) return '';
-  if (FAN.test(text) || BODY.test(text) || FAMILY.test(text)) return '';
+  /* Nothing of alcohol: no drinking talk on this page. */
+  if (FAN.test(text) || BODY.test(text) || FAMILY.test(text) || alcohol(text)) return '';
   if (MINOR_BIO.test(bio) || YOUTH.test(String(a.description || '')) || NOT_A_PERSON.test(bio) || a.protected || st.possibly_sensitive) return '';
   if (lang === 'en') {
     if ((text.match(/[぀-ヿ一-鿿]/g) || []).length > 2 || !/[A-Za-z]{2,}/.test(text) || text.length < 4) return '';
@@ -619,9 +620,9 @@ async function build(lang) {
   /* The file: this run's stories and the earlier ones that are still young and still may play. */
   const fresh = s => Date.now() - Date.parse(s.found || 0) < CONF.hours * 3600e3;
   const pairText = s => s.a.text + ' ' + s.b.text;
-  const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && !slander(pairText(s)) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !AGE.test(s.a.text) && !AGE.test(s.b.text) && !EMOJI_HINT.test(pairText(s))
+  const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && !slander(pairText(s)) && !alcohol(pairText(s)) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !AGE.test(s.a.text) && !AGE.test(s.b.text) && !EMOJI_HINT.test(pairText(s))
     && !FAN.test(pairText(s)) && !BODY.test(pairText(s)) && !FAMILY.test(pairText(s)) && (lang === 'en' || (!POLITE.test(s.a.text) && !POLITE.test(s.b.text)));
-  const fine = x => cleanText(x) && !slander(x) && !UNSAFE_ROMANCE.test(x) && !YOUTH.test(x) && !AGE.test(x) && !EMOJI_HINT.test(x) && !FAN.test(x) && !BODY.test(x) && !FAMILY.test(x) && (lang === 'en' || !POLITE.test(x));
+  const fine = x => cleanText(x) && !slander(x) && !alcohol(x) && !UNSAFE_ROMANCE.test(x) && !YOUTH.test(x) && !AGE.test(x) && !EMOJI_HINT.test(x) && !FAN.test(x) && !BODY.test(x) && !FAMILY.test(x) && (lang === 'en' || !POLITE.test(x));
   const talk = s => {
     if (!Array.isArray(s.t)) return s;
     const at = s.t.findIndex(m => String(m.i) === String(s.a.id));

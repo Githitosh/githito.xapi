@@ -253,16 +253,33 @@ export function wholeCut(h, limit = HEAD_MAX) {
   }
   return c.slice(0, limit - 1).join('') + '…';
 }
-/* What the news is, in one line: the post's first line without links, tags and ruled lines (╋━━━╋). */
+/* A post without its links and its tags. A line of nothing but tags and mentions is left out, and so are
+   the tags a line ends on; a tag written inside a sentence keeps its word, which is often the name the
+   sentence is about (あす放送の『土スタ』は #山田涼介 を大特集: without the word the sentence has a hole). */
+export function untag(raw) {
+  return String(raw || '').split(/\n/).map(line => {
+    let l = line.replace(/https?:\/\/\S+/g, ' ');
+    if (/^[\s　]*(?:[#＃@＠][^\s　#＃@＠]+[\s　]*)+$/.test(l)) return '';
+    l = l.replace(/(?:[\s　]+[#＃@＠][^\s　#＃@＠]+)+[\s　]*$/, '');
+    return l.replace(/[@＠][A-Za-z0-9_]+/g, ' ').replace(/[\s　]*[#＃]([^\s　#＃]+)[\s　]*/g, (m, w, at, all) => {
+      /* No space is left where the tag stood between Japanese words (は #山田涼介 を: は山田涼介を). */
+      const before = all[at - 1] || '', after = all[at + m.length] || '';
+      const ja = c => /[\u3040-\u30ff\u4e00-\u9fff「」『』（）、。！？＆×・]/.test(c);
+      return (/^[\s　]/.test(m) && !(ja(before) && ja(w[0])) ? ' ' : '') + w + (/[\s　]$/.test(m) && !(ja(after) && ja(w[w.length - 1])) ? ' ' : '');
+    });
+  }).join('\n');
+}
+/* What the news is, in one line: the post's first line without links, tags and ruled lines (╋━━━╋), and
+   without the paper's own name at its end (… : 読売新聞). */
 export function headlineOf(raw) {
-  const t = String(raw || '').replace(/https?:\/\/\S+/g, ' ').replace(/[#＃][^\s#＃]+/g, ' ').replace(/[\u2500-\u259f]+/g, ' ').replace(/[ \t　]+/g, ' ');
+  const t = untag(raw).replace(/[\u2500-\u259f]+/g, ' ').replace(/[ \t　]+/g, ' ');
   const lines = t.split(/\n+/).map(s => s.trim()).filter(Boolean);
   let h = lines[0] || '';
   const open = openBracket;
   for (let k = 1; k < lines.length && (charLen(h) < 18 || (open(h) && charLen(h) < 40)); k++) h += (open(h) ? '' : ' ') + lines[k];
   if (charLen(h) > 44) { const m = h.match(/^(.{12,48}?[。！？!?])/u); if (m) h = m[1]; }
   h = h.replace(/^(?:【(?:ヤフートピックス|Yahoo!ニュース|ニュース|記事)】)\s*/, '').replace(/[。、\s]+$/, '').trim().replace(/^【([^【】]+)】$/, '$1');
-  return wholeCut(h);
+  return wholeCut(h.replace(/\s*[:：]\s*[^\s:：]{2,12}(?:新聞|通信|ニュース|オンライン|デジタル)$/, '').trim());
 }
 function newsOk(text, headline) {
   if (!headline || charLen(headline) < 8 || (openBracket(headline) && !/…$/.test(headline))) return false;
@@ -341,9 +358,9 @@ function headOk(text, headline) {
 const NO_REPLY = new Set(['politics', 'safety']);
 /* What the post says after its headline: one more short line for the card, or ''. */
 export function detailOf(raw, headline) {
-  const t = String(raw || '').replace(/https?:\/\/\S+/g, ' ').replace(/[#＃][^\s#＃]+/g, ' ').replace(/[\u2500-\u259f]+/g, ' ').replace(/[ \t　]+/g, ' ');
+  const t = untag(raw).replace(/[\u2500-\u259f]+/g, ' ').replace(/[ \t　]+/g, ' ');
   const head = squash(headline).replace(/…$/, '').slice(0, 20);
-  const lines = t.split(/\n+|(?<=[。！？])/).map(x => x.trim()).filter(Boolean);
+  const lines = t.split(/\n+|(?<=[。！？])(?![」』）)】”’。！？!?A-Za-z0-9])/).map(x => x.trim()).filter(Boolean);
   const at = lines.findIndex(l => squash(l).includes(head.slice(0, 12)) || head.includes(squash(l).slice(0, 12)));
   for (const l of lines.slice(at + 1)) {
     const line = l.replace(/[。\s]+$/, '');

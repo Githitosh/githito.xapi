@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-/* githito.xapi: the news on X, and the replies to the accounts the owner asked for, collected ahead of time.
+/* githito.xapi: replies to the accounts the owner sent, collected ahead of time.
 
-   The News page (githitosh.github.io/news-shorts/) plays the news accounts' own posts as headlines. It
-   plays replies only for an account its reader added in Settings: the page sends that list here as an
-   issue titled "account" (ingest.mjs), which writes accounts.json in the private memo (--memo or
-   XAPI_MEMO_DIR), never a public file. Replies are read only for those accounts' posts; with no account
-   asked for, no reply is searched or read at all. Names from that list are not printed. Searching X when
-   Update is pressed takes too long, so this program does it every half hour and writes one file,
-   v1/news-<lang>.json, that the page only reads.
+   News posts themselves are not chosen here. They come only from news-famous.json in the private memo
+   (XAPI_MEMO_DIR), read by people.mjs. This file keeps no paper, broadcaster or people list, and does
+   not use one when that file is missing. Names from either list are not printed.
+
+   The News page plays replies only for an account its reader added in Settings: the page sends that
+   list here as an issue titled "account" (ingest.mjs), which writes accounts.json in the private memo
+   (--memo or XAPI_MEMO_DIR), never a public file. Replies are read only for those accounts' posts; with
+   no account asked for, no reply is searched or read at all. Searching X when Update is pressed takes
+   too long, so this program does it every half hour and writes one file, v1/news-<lang>.json.
 
      node news.mjs                   build once into ./public (Japanese)
      node news.mjs --searches 40     fewer reply searches (80 unless told); --conversations and --headSearches likewise
@@ -16,26 +18,26 @@
 
    How: X is read through more than one service and more than one way in, so that one of them refusing
    does not stop a run.
-     0. The news accounts' own latest posts: each account's timeline (FxTwitter), or a search when the
-        timeline gives nothing. These are the headlines, and they say how many have replied. The
-        accounts asked for are read first, every run; one that is not a news account gets "q": 1 on its
-        posts, so that the page plays them only for a reader who asked for it.
+     0. The accounts the owner sent, their own latest posts: each account's timeline (FxTwitter), or a
+        search when the timeline gives nothing. These are marked "q": 1, so the page plays them only
+        for a reader who asked for that account. They are not the news accounts. News accounts are
+        read by people.mjs, from the private memo alone.
      1. Replies to the accounts asked for, two ways:
         a. the replies under each news post, read directly (FxTwitter's conversation: one request gives
            a post and about twenty of its replies), the posts with the most replies first;
-        b. searches of replies written to news accounts ("to:nhk_news"), each over a few hours of the
-           last day and a half. The news post such a reply answers is read through vxTwitter, then X's
-           own embed service (publish.x.com), then FxTwitter.
+        b. searches of replies written to those accounts, each over a few hours of the last day and a
+           half. The post such a reply answers is read through vxTwitter, then X's own embed service
+           (publish.x.com), then FxTwitter.
      2. A reply may play when it is an earnest one: a thought about the news in plain words, of 12 to
         80 characters, attacking nobody. No laughter, no cheering, no insults, no blame, nothing
         violent, sexual or heavy, no advertising.
-     3. The post each reply answers is read once (many replies answer the same post). It must be the
-        news account's own post, and the news must not be about a death, a crime, an accident, a
-        disaster or a war: jokes under such news are not for a video.
-     4. The file keeps up to 2000 replies for 72 hours, at most a few for one piece of news, and only
-        replies to the accounts asked for (an account taken off the list takes its replies with it).
-     5. The news accounts' own latest posts are kept too, as headlines (up to 900 for 36 hours). The
-        page plays them when replies are switched off, and for news that gets no replies.
+     3. The post each reply answers is read once (many replies answer the same post). It must be that
+        account's own post, and it must not be about a death, a crime, an accident, a disaster or a
+        war: jokes under such news are not for a video.
+     4. The file keeps up to 2000 replies for 72 hours, at most a few for one post, and only replies
+        to the accounts asked for (an account taken off the list takes its replies with it).
+     5. Headlines already collected stay only when the account is in the private memo, or the owner
+        sent that account. A headline from anyone else is dropped and is not collected again.
    Settings are in config.json under "news"; "on": false turns it off. Node 20 or newer; no packages. */
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -43,6 +45,7 @@ import path from 'node:path';
 import { stamp, readJson, charLen, cleanText, genreOf, readEmbed, readFixupX } from './rules.mjs';
 import { lean, spread, deal } from './pick.mjs';
 import { cruel, personal, slander } from './filters.mjs';
+import { newsAccounts } from './news-accounts.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -86,81 +89,7 @@ let WORDS = { genres: [] };
 try { WORDS = JSON.parse(await readFile(path.join(HERE, 'words.json'), 'utf8')); } catch (e) {}
 
 /* ---------- whose news ---------- */
-/* The account, the name the page shows, the genre of its news when the words do not say, and its share
-   of the searches. An account that never gives a reply is left out after three tries. */
-const ACCOUNTS = {
-  ja: [
-    ['livedoornews', 'ライブドアニュース', '', 6],
-    ['YahooNewsTopics', 'Yahoo!ニュース', '', 5],
-    ['oricon', 'オリコンニュース', 'entertainment', 4],
-    ['modelpress', 'モデルプレス', 'entertainment', 3],
-    ['natalie_mu', '音楽ナタリー', 'entertainment', 3],
-    ['eiga_natalie', '映画ナタリー', 'entertainment', 2],
-    ['owarai_natalie', 'お笑いナタリー', 'entertainment', 2],
-    ['comic_natalie', 'コミックナタリー', 'culture', 2],
-    ['cinematoday', 'シネマトゥデイ', 'entertainment', 3],
-    ['mantanweb', 'MANTANWEB', 'entertainment', 3],
-    ['crank_in_net', 'クランクイン！', 'entertainment', 2],
-    ['thetvjp', 'ザテレビジョン', 'entertainment', 2],
-    ['realsoundjp', 'リアルサウンド', 'entertainment', 1],
-    ['encountofficial', 'ENCOUNT', 'entertainment', 1],
-    ['AnimeAnime_jp', 'アニメ！アニメ！', 'entertainment', 1],
-    ['famitsu', 'ファミ通', 'entertainment', 2],
-    ['4GamerNews', '4Gamer', 'entertainment', 1],
-    ['dengekionline', '電撃オンライン', 'entertainment', 1],
-    ['nikkansports', '日刊スポーツ', 'sports', 5],
-    ['SportsHochi', 'スポーツ報知', 'sports', 5],
-    ['sponichiannex', 'スポニチ', 'sports', 5],
-    ['Daily_Online', 'デイリースポーツ', 'sports', 4],
-    ['sanspocom', 'サンスポ', 'sports', 3],
-    ['Fullcountc2', 'Full-Count', 'sports', 3],
-    ['baseballkingjp', 'BASEBALL KING', 'sports', 2],
-    ['SoccerKingJP', 'サッカーキング', 'sports', 2],
-    ['gekisaka', 'ゲキサカ', 'sports', 1],
-    ['sportsnavi', 'スポーツナビ', 'sports', 2],
-    ['theanswerc2', 'THE ANSWER', 'sports', 1],
-    ['numberweb', 'Number', 'sports', 2],
-    ['itm_nlab', 'ねとらぼ', 'culture', 4],
-    ['grapeejp', 'grape', 'culture', 2],
-    ['maidonanews', 'まいどなニュース', 'culture', 2],
-    ['jtown_net', 'Jタウンネット', 'local', 1],
-    ['withnewsjp', 'withnews', 'culture', 1],
-    ['BuzzFeedJapan', 'BuzzFeed Japan', 'culture', 1],
-    ['HuffPostJapan', 'ハフポスト', '', 1],
-    ['KAI_YOU_ed', 'KAI-YOU', 'culture', 1],
-    ['dailyportalz', 'デイリーポータルZ', 'culture', 1],
-    ['karapaia', 'カラパイア', 'science', 2],
-    ['fashionpressnet', 'ファッションプレス', 'culture', 2],
-    ['rocketnews24', 'ロケットニュース24', 'food', 3],
-    ['macaroni_news', 'macaroni', 'food', 1],
-    ['gnavi', 'ぐるなび', 'restaurant', 1],
-    ['walkerplus_news', 'ウォーカープラス', 'local', 1],
-    ['itmedia_news', 'ITmedia NEWS', 'science', 5],
-    ['gigazine', 'GIGAZINE', 'science', 3],
-    ['wired_jp', 'WIRED', 'science', 1],
-    ['NazologyInfo', 'ナゾロジー', 'science', 2],
-    ['NatGeoMagJP', 'ナショナル ジオグラフィック', 'science', 1],
-    ['sorae_jp', 'sorae', 'space', 2],
-    ['AstroArts', 'アストロアーツ', 'space', 1],
-    ['JAXA_jp', 'JAXA', 'space', 1],
-    ['wni_jp', 'ウェザーニュース', 'local', 3],
-    ['tenkijp', 'tenki.jp', 'local', 2],
-    ['nhk_news', 'NHKニュース', '', 5],
-    ['tbsnewsdig', 'TBS NEWS DIG', '', 3],
-    ['news24ntv', '日テレNEWS', '', 3],
-    ['FNN_News', 'FNNプライムオンライン', '', 3],
-    ['tv_asahi_news', 'テレ朝news', '', 3],
-    ['asahi', '朝日新聞', '', 2],
-    ['mainichi', '毎日新聞', '', 2],
-    ['Yomiuri_Online', '読売新聞', '', 3],
-    ['nikkei', '日本経済新聞', '', 5],
-    ['Sankei_news', '産経ニュース', '', 2],
-    ['kyodo_official', '共同通信', '', 2],
-    ['jijicom', '時事通信', '', 2],
-    ['47news_official', '47NEWS', '', 2],
-    ['entabejp', 'えん食べ', 'food', 1],
-  ],
-};
+/* No list of papers, broadcasters or people lives in this file. News accounts are news-famous.json. */
 const GENRES = ['space', 'politics', 'science', 'culture', 'local', 'entertainment', 'safety', 'sports', 'food', 'restaurant'];
 
 /* ---------- what may play ---------- */
@@ -301,24 +230,6 @@ function genreFor(account, text, lang) {
 const echoes = (reply, news) => { const r = squash(reply), n = squash(news); return r.length >= 8 && (n.includes(r.slice(0, 10)) || r.includes(n.slice(0, 12))); };
 
 /* ---------- the headlines ---------- */
-/* The accounts whose own posts are kept as headlines: the page plays them when replies are switched
-   off, and for news that gets no replies (politics, public safety). */
-/* News accounts read for their headlines only (the last ten: added when the pages stopped reading the web,
-   so that the news of business, of the world and of technology comes from X as well). */
-const HEAD_ONLY = {
-  ja: [
-    ['ReutersJapan', 'ロイター', '', 0], ['bbcnewsjapan', 'BBCニュース', '', 0],
-    ['BloombergJapan', 'ブルームバーグ', '', 0], ['WSJJapan', 'ウォール・ストリート・ジャーナル日本版', '', 0],
-    ['afpbbcom', 'AFPBB News', '', 0], ['cnn_co_jp', 'CNN.co.jp', '', 0],
-    ['nikkei_business', '日経電子版 ビジネス', '', 0], ['tokyo_shimbun', '東京新聞', '', 0], ['jcast_news', 'J-CASTニュース', '', 0],
-    ['cnet_japan', 'CNET Japan', 'science', 0], ['impress_watch', 'Impress Watch', 'science', 0], ['gizmodojapan', 'ギズモード・ジャパン', 'science', 0],
-  ],
-};
-const HEADS = {
-  ja: ['nhk_news', 'YahooNewsTopics', 'livedoornews', '47news_official', 'kyodo_official', 'jijicom', 'asahi', 'mainichi', 'Yomiuri_Online', 'nikkei',
-    'Sankei_news', 'tbsnewsdig', 'news24ntv', 'FNN_News', 'tv_asahi_news', 'ReutersJapan', 'bbcnewsjapan', 'oricon', 'modelpress', 'nikkansports',
-    'SportsHochi', 'sponichiannex', 'Fullcountc2', 'itmedia_news', 'gigazine', 'wni_jp', 'natalie_mu', 'cinematoday', 'famitsu', 'mantanweb'],
-};
 /* Never as a headline in a video, whatever the page's own switches say. */
 const NOT_A_HEADLINE = /わいせつ|性的|性被害|性加害|性暴力|不同意|レイプ|強姦|児童ポルノ|盗撮|痴漢|自殺|自死|心中|虐待|遺体|殺害|殺人|刺殺|死傷/;
 const CRIME = /逮捕|容疑|送検|起訴|被告|判決|懲役|警察|警視庁|県警|府警|道警|事件|詐欺|窃盗|強盗|横領|暴行|傷害|脅迫|飲酒運転|ひき逃げ|事故|火災|火事|消防|救急|行方不明|遭難|防犯|防災|避難|警報|注意報/;
@@ -495,7 +406,6 @@ async function build(lang) {
   const before = await readJson(file, {});
   const oldNews = (before.news && typeof before.news === 'object') ? before.news : {};
   const oldItems = (Array.isArray(before.items) ? before.items : []).filter(x => x && x.id && x.h && x.t && x.n && oldNews[x.n]);
-  const tally = (before.accounts && typeof before.accounts === 'object') ? before.accounts : {};
   /* The accounts asked for (accounts.json in the private memo, written by ingest.mjs). Not the public files. */
   const askedFile = CONF.memo ? await readJson(path.join(CONF.memo, 'accounts.json'), {}) : {};
   const askedList = [...new Set((Array.isArray(askedFile.accounts) ? askedFile.accounts : []).map(a => String((a && a.h) || '')).filter(h => /^[A-Za-z0-9_]{1,15}$/.test(h)))].slice(0, 8);
@@ -511,49 +421,46 @@ async function build(lang) {
   }
   const asked = new Set(askedList.map(h => h.toLowerCase()));
   const isAsked = a => !!a && asked.has(String(a[0]).toLowerCase());
-  const base = (ACCOUNTS[lang] || []).concat(HEAD_ONLY[lang] || []);
-  const newsAccount = new Set(base.map(a => a[0].toLowerCase()));
+  /* News accounts are the private memo only. No built-in list is kept for when the file is missing.
+     Their posts are read by people.mjs. This run reads replies only for accounts the owner sent. */
+  const memo = await newsAccounts(CONF.memo);
+  const newsHandles = new Set((memo[lang] || []).map(e => e.h.toLowerCase()));
+  const newsAccount = newsHandles;
   const oldNames = new Map((Array.isArray(before.asked) ? before.asked : []).filter(a => a && a.h).map(a => [String(a.h).toLowerCase(), String(a.n || '')]));
-  /* An account asked for that is not in the table joins it for this run; a headline-only account asked for gets replies too. */
-  const accounts = (ACCOUNTS[lang] || []).slice();
-  askedList.forEach(h => {
-    if (accounts.some(a => a[0].toLowerCase() === h.toLowerCase())) return;
-    const known = base.find(a => a[0].toLowerCase() === h.toLowerCase());
-    accounts.push(known ? [known[0], known[1], known[2], 3] : [h, oldNames.get(h.toLowerCase()) || '@' + h, '', 3]);
+  const accounts = askedList.map(h => [h, oldNames.get(h.toLowerCase()) || '', '', 3]);
+  /* Counts of earlier searches are kept only for accounts the owner sent, so a paper's name does not
+     stay in the public file. */
+  const tally = {};
+  Object.entries((before.accounts && typeof before.accounts === 'object') ? before.accounts : {}).forEach(([h, v]) => {
+    if (asked.has(String(h).toLowerCase())) tally[h] = v;
   });
-  if (!CONF.memo) console.log(`  ${lang}: no private folder for the account list, so no reply is read (headlines only)`);
-  else if (askedList.length) console.log(`  ${lang}: replies are read for ${askedList.length} account${askedList.length === 1 ? '' : 's'} from the private list`);
-  else console.log(`  ${lang}: no account is asked for, so no reply is read (headlines only)`);
-  /* A name from the private list is not printed. News accounts that are not on that list still are. */
-  const quiet = h => asked.has(String(h || '').toLowerCase());
+  if (memo.missing) console.log(`  ${lang}: no news-famous.json, so no news account is read`);
+  else console.log(`  ${lang}: ${newsHandles.size} news accounts from the private memo`);
+  if (!CONF.memo) console.log(`  ${lang}: no private folder, so no reply is read`);
+  else if (askedList.length) console.log(`  ${lang}: replies are read for ${askedList.length} account${askedList.length === 1 ? '' : 's'} the owner sent`);
+  else console.log(`  ${lang}: no account was sent, so no reply is read`);
+  /* A name is never printed. */
   const byHandle = new Map(accounts.map(a => [a[0].toLowerCase(), a]));
   const have = new Set(oldItems.map(x => x.id));
   const texts = new Set(oldItems.map(x => squash(x.t).slice(0, 40)));
   const count = { searches: 0, replies: 0, candidates: 0, read: 0, news: 0, items: 0, headSearches: 0, heads: 0, conversations: 0, convReplies: 0 };
   const deadline = Date.now() + CONF.minutes * 60e3;
   const late = () => Date.now() > deadline;
-  const everyAccount = (HEAD_ONLY[lang] || []).filter(a => !byHandle.has(a[0].toLowerCase())).concat(accounts);
+  const everyAccount = accounts;
   const anyHandle = new Map(everyAccount.map(a => [a[0].toLowerCase(), a]));
 
-  /* 0. The headlines: the news accounts' own latest posts. They are collected as the Humor stories are:
-     in rounds, for the run's time, through two ways in (an account's timeline, and a search of its
-     posts). A way that refuses is left alone for a couple of minutes while the other goes on, and an
-     account that could not be read waits its turn again, so one refusal does not end the run. The
-     accounts asked for come first, then the main papers (every run), then the others, those read
-     longest ago first, so that every run reads different ones. */
+  /* 0. Posts of the accounts the owner sent. No paper and no account from a built-in list. News
+     accounts are not read here. */
   const oldHeads = (Array.isArray(before.heads) ? before.heads : []).filter(x => x && x.id && x.h && x.t);
   const haveHead = new Set(oldHeads.map(x => x.id));
   const newHeads = [];
-  const posts = [];   // the news posts seen in this run: where replies are read from
+  const posts = [];   // the posts seen in this run: where replies are read from
   const readAt = {};
-  Object.entries((before.readAt && typeof before.readAt === 'object') ? before.readAt : {}).forEach(([h, at]) => { if (Date.now() - Date.parse(at || 0) < 7 * 24 * 3600e3) readAt[h] = at; });
-  const lastRead = h => Date.parse(readAt[String(h).toLowerCase()] || 0) || 0;
-  const mainHeads = (HEADS[lang] || []).filter(h => !asked.has(h.toLowerCase()));
-  /* The others: the rest of the table and the headline-only accounts that are not among the main ones. */
-  const otherHeads = shuffle(everyAccount.map(a => a[0]).filter(h => !asked.has(h.toLowerCase()) && !mainHeads.includes(h))).sort((x, y) => lastRead(x) - lastRead(y));
-  const queue = askedList.concat(shuffle(mainHeads)).concat(otherHeads).slice(0, askedList.length + CONF.headSearches).map(handle => ({ handle, tries: 0 }));
-  /* With replies to read (accounts asked for) the headlines take four fifths of the time, so that what
-     was asked for does not take the run from the news of everybody; otherwise nearly all of it. */
+  Object.entries((before.readAt && typeof before.readAt === 'object') ? before.readAt : {}).forEach(([h, at]) => {
+    if (!asked.has(String(h).toLowerCase())) return;
+    if (Date.now() - Date.parse(at || 0) < 7 * 24 * 3600e3) readAt[h] = at;
+  });
+  const queue = askedList.slice(0, CONF.headSearches).map(handle => ({ handle, tries: 0 }));
   const headUntil = deadline - (askedList.length ? CONF.minutes * 12e3 : 30e3);
   const wayRest = { timeline: 0, search: 0 };
   const refusedTimes = { timeline: 0, search: 0 };
@@ -606,8 +513,7 @@ async function build(lang) {
     count[way === 'timeline' ? 'byTimeline' : 'bySearch'] = (count[way === 'timeline' ? 'byTimeline' : 'bySearch'] || 0) + 1;
     readAt[job.handle.toLowerCase()] = stamp();
     const got = takePosts(job.handle, a, list);
-    const who = quiet(job.handle) ? 'an asked account' : '@' + job.handle;
-    console.log(`  ${lang} headlines ${who} (${way}): ${list.length} posts, ${got} new`);
+    console.log(`  ${lang} headlines, an account the owner sent (${way}): ${list.length} posts, ${got} new`);
     await sleep(way === 'search' ? CONF.pause : 1500);
   }
   if (queue.length && !CONF.noSearch) console.log(`  headlines: time is up with ${queue.length} accounts not read (they come first next time)`);
@@ -783,7 +689,7 @@ async function build(lang) {
   const sourceLog = {};
   items.forEach(x => {
     const a = usedNews[x.n];
-    const key = a && quiet(a.h) ? 'an asked account' : (a ? a.n : '');
+    const key = a ? 'an asked account' : '';
     if (key) sourceLog[key] = (sourceLog[key] || 0) + 1;
   });
   console.log('  by source: ' + JSON.stringify(sourceLog));
@@ -792,15 +698,16 @@ async function build(lang) {
   const headSeen = new Set();
   const askedKept = new Map();
   const rcNow = new Map(posts.map(p => [p.id, p.replies]));
-  const heads = newHeads.concat(oldHeads.filter(x => headFresh(x) && headOk(x.t + ' ' + (x.d || ''), x.t) && (!x.q || askedPostOk(x.t + ' ' + (x.d || '')))).map(x => ({ ...x, g: headGenre(anyHandle.get(String(x.h).toLowerCase()), x.t, lang), rc: rcNow.has(x.id) ? rcNow.get(x.id) : (Number(x.rc) || 0) })))
+  /* A headline that is not from the memo, and not one the owner sent (q), is dropped and not refilled. */
+  const memoHead = x => newsHandles.has(String(x.h || '').replace(/^@+/, '').toLowerCase());
+  const heads = newHeads.concat(oldHeads.filter(x => (x.q || memoHead(x)) && headFresh(x) && headOk(x.t + ' ' + (x.d || ''), x.t) && (!x.q || askedPostOk(x.t + ' ' + (x.d || '')))).map(x => ({ ...x, g: headGenre(anyHandle.get(String(x.h).toLowerCase()), x.t, lang), rc: rcNow.has(x.id) ? rcNow.get(x.id) : (Number(x.rc) || 0) })))
     .sort((x, y) => (Date.parse(y.at || y.found || 0) || 0) - (Date.parse(x.at || x.found || 0) || 0))
     .filter(x => { const k = squash(x.t).slice(0, 24); if (headSeen.has(k)) return false; headSeen.add(k); return true; })
     /* An asked account that is no paper keeps its newest few, so it cannot fill the file. */
     .filter(x => { if (!x.q) return true; const k = String(x.h).toLowerCase(); askedKept.set(k, (askedKept.get(k) || 0) + 1); return askedKept.get(k) <= ASKED.keep; })
     .slice(0, CONF.headKeep);
   /* The headlines in English too, for the card (the newest first; those done in earlier runs keep theirs). */
-  /* (No translation: Google's translation without a key is no official service. English news is collected
-     and written in English by english.mjs.) */
+  /* (No translation. English posts are read by people.mjs from the private memo, in English as written.) */
   heads.forEach(x => { delete x.e; });
   if (false) {
     const todo = heads.filter(x => !x.e).slice(0, CONF.translate);

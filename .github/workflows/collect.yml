@@ -145,27 +145,46 @@ jobs:
           git commit -q -m "API data $(date -u +%Y-%m-%dT%H:%MZ)"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" api
           rm -rf .git
-      # What people reply to the news, and the headlines (the News page plays these).
+      # Replies to accounts the owner sent (news.mjs). News accounts are not chosen here.
       - name: Replies to the news
         if: ${{ !inputs.only || inputs.only == 'news' }}
         continue-on-error: true
         env:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node news.mjs --out public ${{ inputs.searches && format('--searches {0}', inputs.searches) || '' }}
-      # What people say about the news (people.mjs): replies with reach (followers, likes) to the most
-      # answered news that is not politics or public safety. News closes each video with three of them.
-      - name: What people say about the news
+      # News posts (people.mjs): only accounts in the private memo's news-famous.json. No built-in list.
+      # When that file is missing, no news account is read. Names are not printed.
+      - name: News posts from the private memo
         if: ${{ !inputs.only || inputs.only == 'news' }}
         continue-on-error: true
         run: node people.mjs --out public
-      # English news (english.mjs): English news accounts' latest posts, in English as written. Nothing is
-      # translated (no unofficial translator); stock.mjs writes the English cards from these.
+      # English headlines already collected: kept only when the account is in that same file.
       - name: English news
         if: ${{ !inputs.only || inputs.only == 'news' }}
         continue-on-error: true
         run: node english.mjs --out public
-      # The video stock (stock.mjs): the words of every card written and checked (compose.mjs), and the cards
-      # dealt into videos of ten, about a hundred kept. The pages read these files only.
+      # news-read.json (who was read) is written by people.mjs into the memo. Save it here, after that
+      # write. Names are not printed. The humor memo was saved above; this push includes both.
+      - name: Save the memo again (news)
+        if: ${{ env.XAPI_MEMO_DIR != '' }}
+        continue-on-error: true
+        env:
+          MEMO_TOKEN: ${{ secrets.MEMO_TOKEN }}
+          MEMO_REPO: ${{ vars.MEMO_REPO || format('{0}/githito.memo', github.repository_owner) }}
+        run: |
+          cd "$XAPI_MEMO_DIR"
+          git config user.name "githito.xapi collector"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "The memo did not change."; exit 0; fi
+          git commit -q -m "Memo $(date -u +%Y-%m-%dT%H:%MZ)"
+          if git push -q "https://x-access-token:${MEMO_TOKEN}@github.com/${MEMO_REPO}.git" HEAD:main; then
+            echo "The memo is saved in the private repository."
+          else
+            echo "The memo could not be saved in the private repository."
+          fi
+      # The video stock (stock.mjs). News cards whose accounts are not in the private memo are dropped
+      # here and are not refilled. Humor stock stays. Memo cards keep accumulating.
       - name: Cards and the video stock
         if: ${{ always() }}
         continue-on-error: true

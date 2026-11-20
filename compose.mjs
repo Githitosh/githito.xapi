@@ -17,7 +17,7 @@
    reader asked for, the reply alone (replyCard).
 
    Nothing here asks anything of anybody: it reads the files the collectors wrote. */
-import { cruel, personal, slander, alcohol, tobacco } from './filters.mjs';
+import { cruel, personal, slander, alcohol, tobacco, adultNews } from './filters.mjs';
 
 /* ---------- who the news is about ---------- */
 /* A card of speed-read news says what happened on its second beat and who did it, said it or showed it on
@@ -244,7 +244,8 @@ function extra(t, d) {
 /* ---------- News ---------- */
 /* x: a headline as news.mjs keeps it ({ id, h, n, t, d, g, at, q }). The card, or null. */
 export function newsCard(x) {
-  if (!x || !x.id || !x.t || AD.test(String(x.t) + ' ' + String(x.d || ''))) return null;
+  /* No advertisement; no alcohol or smoking unless it is a company's news (adultNews, filters.mjs). */
+  if (!x || !x.id || !x.t || AD.test(String(x.t) + ' ' + String(x.d || '')) || adultNews(String(x.t) + ' ' + String(x.d || ''))) return null;
   const t = fixPart(x.t);
   const d = fixPart(extra(t, tidyNews(x.d || '')));
   if (!t) return null;

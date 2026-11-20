@@ -238,17 +238,31 @@ function replyScore(text, st) {
 }
 /* A bracket that is opened and not closed: the line goes on. */
 const openBracket = t => ['「」', '『』', '【】', '（）', '()', '“”'].some(([a, b]) => String(t).split(a).length > String(t).split(b).length);
-/* What the news is, in one line: the post's first line without links and tags, cut to fit a card. */
+/* A headline longer than a card can show ends where its sentence turns (a space, a comma, a bracket), not
+   in the middle of a word, and without dots: what is shown is whole. Only a line with nowhere to turn is
+   cut at the limit, with … */
+const HEAD_MAX = 60;
+export function wholeCut(h, limit = HEAD_MAX) {
+  const c = [...String(h || '')];
+  if (c.length <= limit) return c.join('');
+  for (let i = limit; i >= Math.floor(limit / 2); i--) {
+    const prev = c[i - 1], next = c[i];
+    if (!(/[\s　、。！？!?／｜|]/.test(prev) || '」』）)】〕'.includes(prev) || '「『（(【〔'.includes(next))) continue;
+    const kept = c.slice(0, i).join('').replace(/[\s　、／｜|―－–—]+$/, '').trim();
+    if (kept && !openBracket(kept)) return kept;
+  }
+  return c.slice(0, limit - 1).join('') + '…';
+}
+/* What the news is, in one line: the post's first line without links, tags and ruled lines (╋━━━╋). */
 export function headlineOf(raw) {
-  const t = String(raw || '').replace(/https?:\/\/\S+/g, ' ').replace(/[#＃][^\s#＃]+/g, ' ').replace(/[ \t　]+/g, ' ');
+  const t = String(raw || '').replace(/https?:\/\/\S+/g, ' ').replace(/[#＃][^\s#＃]+/g, ' ').replace(/[\u2500-\u259f]+/g, ' ').replace(/[ \t　]+/g, ' ');
   const lines = t.split(/\n+/).map(s => s.trim()).filter(Boolean);
   let h = lines[0] || '';
   const open = openBracket;
   for (let k = 1; k < lines.length && (charLen(h) < 18 || (open(h) && charLen(h) < 40)); k++) h += (open(h) ? '' : ' ') + lines[k];
   if (charLen(h) > 44) { const m = h.match(/^(.{12,48}?[。！？!?])/u); if (m) h = m[1]; }
   h = h.replace(/^(?:【(?:ヤフートピックス|Yahoo!ニュース|ニュース|記事)】)\s*/, '').replace(/[。、\s]+$/, '').trim().replace(/^【([^【】]+)】$/, '$1');
-  const chars = [...h];
-  return chars.length > 46 ? chars.slice(0, 45).join('') + '…' : h;
+  return wholeCut(h);
 }
 function newsOk(text, headline) {
   if (!headline || charLen(headline) < 8 || (openBracket(headline) && !/…$/.test(headline))) return false;
@@ -327,7 +341,7 @@ function headOk(text, headline) {
 const NO_REPLY = new Set(['politics', 'safety']);
 /* What the post says after its headline: one more short line for the card, or ''. */
 export function detailOf(raw, headline) {
-  const t = String(raw || '').replace(/https?:\/\/\S+/g, ' ').replace(/[#＃][^\s#＃]+/g, ' ').replace(/[ \t　]+/g, ' ');
+  const t = String(raw || '').replace(/https?:\/\/\S+/g, ' ').replace(/[#＃][^\s#＃]+/g, ' ').replace(/[\u2500-\u259f]+/g, ' ').replace(/[ \t　]+/g, ' ');
   const head = squash(headline).replace(/…$/, '').slice(0, 20);
   const lines = t.split(/\n+|(?<=[。！？])/).map(x => x.trim()).filter(Boolean);
   const at = lines.findIndex(l => squash(l).includes(head.slice(0, 12)) || head.includes(squash(l).slice(0, 12)));

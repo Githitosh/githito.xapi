@@ -26,6 +26,9 @@ const ACCOUNTS = [
   ['nytimes', 'The New York Times', ''], ['guardian', 'The Guardian', ''], ['AJEnglish', 'Al Jazeera', ''], ['NHKWORLD_News', 'NHK World', ''],
   ['kyodo_english', 'Kyodo News', ''], ['FT', 'Financial Times', ''], ['TheEconomist', 'The Economist', ''], ['washingtonpost', 'The Washington Post', ''],
   ['ABC', 'ABC News', ''], ['axios', 'Axios', ''], ['espn', 'ESPN', 'sports'], ['Variety', 'Variety', 'entertainment'], ['NASA', 'NASA', 'space'],
+  /* Light news, whose replies are people's own words more than a quarrel (people.mjs reads them). */
+  ['NatGeo', 'National Geographic', 'science'], ['billboard', 'Billboard', 'entertainment'], ['IGN', 'IGN', 'entertainment'], ['NBA', 'NBA', 'sports'],
+  ['netflix', 'Netflix', 'entertainment'], ['NintendoAmerica', 'Nintendo of America', 'entertainment'], ['Pokemon', 'Pokémon', 'entertainment'], ['Marvel', 'Marvel', 'entertainment'],
 ];
 const GENRE_WORDS = [
   ['sports', /\b(?:match|game|season|league|cup|coach|striker|goal|win|wins|beat|beats|champion\w*|title|olympic\w*|tournament|sumo|yokozuna|baseball|football|soccer|nba|nfl|mlb|tennis|golf|f1|marathon)\b/i],
@@ -72,7 +75,7 @@ async function main() {
       const t = headlineEn(st.text);
       if (!id || have.has(id) || !ok(t, String(st.text || ''))) continue;
       have.add(id);
-      heads.push({ id, h, n, t, g: genreOf(t, g), at: st.created_at ? new Date(st.created_at).toISOString().replace(/\.\d+Z$/, 'Z') : '', found: stamp() });
+      heads.push({ id, h, n, t, g: genreOf(t, g), rc: Number(st.replies) || 0, at: st.created_at ? new Date(st.created_at).toISOString().replace(/\.\d+Z$/, 'Z') : '', found: stamp() });
       got++;
     }
     await sleep(1200);

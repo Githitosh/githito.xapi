@@ -252,7 +252,8 @@ export function topicOf(text, kw) {
   let best = null;
   comps.forEach(([w, c], i) => {
     const n = len(w);
-    if (PLAIN_TOPIC.test(w) || (k && (w.includes(k) || k.includes(w)))) return;
+    /* (Not a counter cut off from its number: 27年卒大学生 is no 年卒大学生.) */
+    if (PLAIN_TOPIC.test(w) || /^[年月日歳人件円万億時分秒台位点倍]/.test(w) || (k && (w.includes(k) || k.includes(w)))) return;
     let sc = 0;
     if (c === 'a') sc = n >= 3 && n <= 10 ? 6 : 0;
     else if (c === 'l') sc = n >= 3 && n <= 12 && !/^(?:Hey|Say|The|And|For|With|New|News|Live|Video)$/i.test(w) ? 5 : 0;
@@ -307,17 +308,38 @@ export function newsCard(x) {
   return null;
 }
 
-/* What a person said about the news (people.mjs): their words on the second beat, their name on the third
-   (speed-read news: what, then who), and in the corner what the news is about. news: the post replied to. */
+/* A person's words as a card of News (people.mjs). News is made of people's own words: the keyword, then
+   their words in two beats (cut where the sentence turns), and their name in the top right corner (nm). Words
+   too short to cut give the third beat to what they are talking about, written here (「ガンダムベース」について).
+   news: the post they replied to (only its topic is used; the paper is not shown). */
+const nameOf = (n, h) => { const x = String(n || '').replace(EMOJI, '|').split(/[|｜／/@＠（(【\[]|\s{2,}/)[0].trim(); return len(x) >= 2 ? [...x].slice(0, 14).join('') : '@' + h; };
 export function personCard(p, news) {
   if (!p || !p.id || !p.t || !p.h) return null;
-  const words = tidyNews(p.t);
+  const words = tidyNews(String(p.t).replace(/^[＞>]+\s*/, ''));
   if (!partOk(words, 'what') || cruel(words) || personal(words) || slander(words) || alcohol(words) || tobacco(words)) return null;
-  /* The name as it is shown, without the emoji, flags and slogans people add to it. */
-  const name = String(p.n || '').replace(EMOJI, '|').split(/[|｜／/@＠（(【\[]|\s{1,}/)[0].trim() || '@' + p.h;
   const kw = keyword(words);
-  const tp = news ? (topicOf(tidyNews(news.t), kw) || keyword(tidyNews(news.t))) : '';
-  return { id: String(p.id), h: p.h, n: name, g: (news && news.g) || p.g || '', at: p.at || p.found || '', kw, ...(tp ? { tp } : {}), ja: [words, len(name) >= 2 ? name : '@' + p.h], how: 'person', f: p.f || 0, l: p.l || 0 };
+  const tp = news ? (topicOf(tidyNews(news.t), kw) || '') : '';
+  const cut = cutJa(words);
+  let ja = null, how = 'cut';
+  if (cut[1] && partOk(fixPart(cut[0]), 'what') && partOk(fixPart(cut[1]), 'what')) ja = [fixPart(cut[0]), fixPart(cut[1])];
+  else if (tp) { ja = [words, '「' + tp + '」について']; how = 'about'; }
+  if (!ja) return null;
+  return { id: String(p.id), h: p.h, nm: nameOf(p.n, p.h), g: (news && news.g) || p.g || '', at: p.at || p.found || '', kw, ...(tp ? { tp } : {}), ja, how: 'person', cut: how, f: p.f || 0, l: p.l || 0 };
+}
+/* The same in English (people-en.json): their words in two beats, or their words and "About Brexit". */
+export function personCardEn(p, news) {
+  if (!p || !p.id || !p.t || !p.h) return null;
+  const words = String(p.t).replace(/https?:\/\/\S+/g, ' ').replace(EMOJI, ' ').replace(/\s+/g, ' ').trim();
+  if (words.length < 20 || words.length > 160 || cruel(words) || personal(words) || alcohol(words) || tobacco(words)) return null;
+  const kw = keywordEn(words);
+  const tp = news ? keywordEn(String(news.t), kw) : '';
+  const c = cutEn2(words);
+  const fine = s => s && s.length >= 8 && s.length <= 90;
+  let ja = null, how = 'cut';
+  if (c[1] && fine(c[0]) && fine(c[1])) ja = [c[0], c[1].charAt(0).toUpperCase() + c[1].slice(1)];
+  else if (words.length <= 90 && tp && tp !== 'NEWS') { ja = [words, 'About ' + tp]; how = 'about'; }
+  if (!ja) return null;
+  return { id: String(p.id), h: p.h, nm: nameOf(p.n, p.h), g: (news && news.g) || p.g || '', at: p.at || p.found || '', kw, ...(tp && tp !== 'NEWS' ? { tp } : {}), ja, how: 'person', cut: how, lang: 'en', f: p.f || 0, l: p.l || 0 };
 }
 
 /* ---------- News in English ---------- */

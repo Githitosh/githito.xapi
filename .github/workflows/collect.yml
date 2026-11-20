@@ -61,9 +61,26 @@ jobs:
           echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
           mkdir -p public
           if git fetch --depth=1 origin api 2>/dev/null; then git archive FETCH_HEAD | tar -x -C public; fi
-      # Requests the owner sent as issues ("account": the accounts whose replies the News page may play;
-      # "talk"): read first, so that this run already collects for them. The Ingest workflow does the same
-      # when the issue is opened, but it may have given way to a run of this chain.
+      # The memo (humor.mjs, and the account list ingest.mjs writes) is a PRIVATE repository, never among
+      # the public files. It is read before the requests, so an "account" issue is saved there and news.mjs
+      # can read it in this same run. Names from that list are not printed.
+      - name: The memo (a private repository)
+        continue-on-error: true
+        env:
+          MEMO_TOKEN: ${{ secrets.MEMO_TOKEN }}
+          MEMO_REPO: ${{ vars.MEMO_REPO || format('{0}/githito.memo', github.repository_owner) }}
+        run: |
+          if [ -z "$MEMO_TOKEN" ]; then echo "No MEMO_TOKEN secret: the memo is not kept."; exit 0; fi
+          if git clone -q --depth=1 "https://x-access-token:${MEMO_TOKEN}@github.com/${MEMO_REPO}.git" "$RUNNER_TEMP/memo"; then
+            git -C "$RUNNER_TEMP/memo" remote set-url origin "https://github.com/${MEMO_REPO}.git"
+            echo "XAPI_MEMO_DIR=$RUNNER_TEMP/memo" >> "$GITHUB_ENV"
+            echo "The memo is read from the private repository."
+          else
+            echo "The private repository could not be read: the memo is not kept in this run."
+          fi
+      # Requests the owner sent as issues ("account": the accounts whose replies the News page may play,
+      # saved only in the private memo; "talk"): read first, so that this run already collects for them.
+      # The Ingest workflow does the same when the issue is opened, but it may have given way to a run of this chain.
       - name: Requests sent as issues
         continue-on-error: true
         env:
@@ -78,26 +95,10 @@ jobs:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node collect.mjs --out public
       # The Humor page's stories (loving exchanges; greetings in their hours).
-      # The memo of accounts (humor.mjs: the accounts worth coming back to) is kept in a PRIVATE repository,
-      # never among the public files. It needs two things set once by the owner: a private repository named
+      # The memo was read above. It needs two things set once by the owner: a private repository named
       # githito.memo (or the name in the repository variable MEMO_REPO, "owner/name"), and the secret
       # MEMO_TOKEN, a fine-grained token that may read and write that repository's contents. Without the
-      # secret this step does nothing and nothing is remembered.
-      - name: The memo (a private repository)
-        if: ${{ !inputs.only || inputs.only == 'humor' }}
-        continue-on-error: true
-        env:
-          MEMO_TOKEN: ${{ secrets.MEMO_TOKEN }}
-          MEMO_REPO: ${{ vars.MEMO_REPO || format('{0}/githito.memo', github.repository_owner) }}
-        run: |
-          if [ -z "$MEMO_TOKEN" ]; then echo "No MEMO_TOKEN secret: the memo is not kept."; exit 0; fi
-          if git clone -q --depth=1 "https://x-access-token:${MEMO_TOKEN}@github.com/${MEMO_REPO}.git" "$RUNNER_TEMP/memo"; then
-            git -C "$RUNNER_TEMP/memo" remote set-url origin "https://github.com/${MEMO_REPO}.git"
-            echo "XAPI_MEMO_DIR=$RUNNER_TEMP/memo" >> "$GITHUB_ENV"
-            echo "The memo is read from the private repository."
-          else
-            echo "The private repository could not be read: the memo is not kept in this run."
-          fi
+      # secret nothing is remembered and an account list is not saved.
       - name: Humor stories
         if: ${{ !inputs.only || inputs.only == 'humor' }}
         continue-on-error: true
@@ -105,7 +106,7 @@ jobs:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node humor.mjs --out public
       - name: Save the memo (the private repository)
-        if: ${{ env.XAPI_MEMO_DIR != '' && (!inputs.only || inputs.only == 'humor') }}
+        if: ${{ env.XAPI_MEMO_DIR != '' }}
         continue-on-error: true
         env:
           MEMO_TOKEN: ${{ secrets.MEMO_TOKEN }}
@@ -123,6 +124,8 @@ jobs:
         if: ${{ !inputs.only || inputs.only == 'humor' }}
         run: |
           cd public
+          # The account list is private. Never publish it, even if an older run left the file here.
+          if [ -f v1/accounts.json ]; then rm -f v1/accounts.json; touch .changed; fi
           if [ ! -f .changed ]; then echo "Nothing new to publish."; exit 0; fi
           rm -f .changed
           rm -rf .git
@@ -149,6 +152,8 @@ jobs:
       - name: Publish (branch api, one commit, no history kept)
         run: |
           cd public
+          # The account list is private. Never publish it, even if an older run left the file here.
+          if [ -f v1/accounts.json ]; then rm -f v1/accounts.json; touch .changed; fi
           if [ ! -f .changed ]; then echo "Nothing new to publish."; exit 0; fi
           rm -f .changed
           rm -rf .git

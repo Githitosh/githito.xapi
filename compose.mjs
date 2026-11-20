@@ -220,11 +220,12 @@ export function keyword(text) {
      word in kanji that is no date, number or plain word (１０月消費者物価: 消費者, not 月消費者). */
   let words = [];
   try { words = [...new Intl.Segmenter('ja', { granularity: 'word' }).segment(t)].filter(x => x.isWordLike).map(x => x.segment); } catch (e) { words = []; }
-  const kata = words.filter(w => /^[゠-ヿ]{3,10}$/.test(w)).sort((a, b) => len(b) - len(a))[0];
+  /* (A katakana word has letters, not only long-vowel marks: ねこーー gives no ーー.) */
+  const kata = words.filter(w => /^[゠-ヿ]{3,10}$/.test(w) && /[ァ-ヺ]/.test(w)).sort((a, b) => len(b) - len(a))[0];
   if (kata) return kata.slice(0, 8);
   const kanji = words.find(w => /^[一-鿿々]{2,6}$/.test(w) && !PLAIN_WORD.test(w));
   if (kanji) return kanji;
-  const katas = t.match(/[゠-ヿ]{2,8}/g) || [];
+  const katas = (t.match(/[゠-ヿ]{2,8}/g) || []).filter(w => /[ァ-ヺ]/.test(w));
   if (katas.length) return katas.sort((a, b) => len(b) - len(a))[0].slice(0, 8);
   const run = t.match(/(?<![0-9０-９])[一-鿿]{2,4}/);
   if (run) return run[0];

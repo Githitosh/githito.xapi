@@ -39,6 +39,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { stamp, readJson, charLen, cleanText, readFixupX } from './rules.mjs';
 import { lean, spread, deal } from './pick.mjs';
+import { slander } from './filters.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -291,6 +292,8 @@ function pairFrom(pst, cst, lang) {
   if (!aText) return why('the post may not play');
   if (!bText) return why('the reply may not play');
   if (charLen(aText) > LONG[lang] || charLen(bText) > LONG[lang]) return why('too long');
+  /* Insults, charges against a person, threats, anything pointing at where somebody lives (filters.mjs). */
+  if (slander(aText) || slander(bText)) return why('unkind words');
   if (followers(pst) > 20000 || followers(cst) > 20000) return why('famous');
   if (!LOVE[lang].test(bText)) return why('the reply is not loving');
   if (!(WORDS[lang].test(bText) || WORDS[lang].test(aText))) return why('a heart but no words');
@@ -518,7 +521,7 @@ async function build(lang) {
   /* The file: this run's stories and the earlier ones that are still young and still may play. */
   const fresh = s => Date.now() - Date.parse(s.found || 0) < CONF.hours * 3600e3;
   const pairText = s => s.a.text + ' ' + s.b.text;
-  const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !AGE.test(s.a.text) && !AGE.test(s.b.text) && !EMOJI_HINT.test(pairText(s))
+  const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && !slander(pairText(s)) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !AGE.test(s.a.text) && !AGE.test(s.b.text) && !EMOJI_HINT.test(pairText(s))
     && !FAN.test(pairText(s)) && !BODY.test(pairText(s)) && !FAMILY.test(pairText(s)) && (lang === 'en' || (!POLITE.test(s.a.text) && !POLITE.test(s.b.text)));
   const stories = found.filter(s => !skipped(s.a.handle) && !skipped(s.b.handle)).concat(old.filter(s => fresh(s) && ok(s) && !skipped(s.a.handle) && !skipped(s.b.handle)).map(s => ({ ...s, kind: talkKind(pairText(s)) }))).slice(0, CONF.keep);
   const kinds = {};

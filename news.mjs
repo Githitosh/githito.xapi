@@ -41,6 +41,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { stamp, readJson, charLen, cleanText, genreOf, readEmbed, readFixupX } from './rules.mjs';
 import { lean, spread, deal } from './pick.mjs';
+import { cruel, personal, slander } from './filters.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -208,7 +209,8 @@ function replyOk(text) {
   if (!text || n < 12 || n > 80 || !earnest(text)) return false;
   if ((text.match(/[぀-ヿ]/g) || []).length < 2) return false;
   if (/@\w/.test(text) || /[ｦ-ﾟ]{3,}/.test(text) || /(.)\1{5,}/u.test(text)) return false;
-  return cleanText(text) && !NASTY.test(text) && !UNKIND.test(text) && !GROUPS.test(text) && !SPAM.test(text) && !EMPTY.test(text) && !GRAVE.test(text) && !STATE.test(text);
+  /* slander (filters.mjs): insults, charges against a person, threats, anything pointing at where somebody lives. */
+  return cleanText(text) && !slander(text) && !NASTY.test(text) && !UNKIND.test(text) && !GROUPS.test(text) && !SPAM.test(text) && !EMPTY.test(text) && !GRAVE.test(text) && !STATE.test(text);
 }
 function replyText(st) {
   const text = postText(st);
@@ -247,7 +249,7 @@ export function headlineOf(raw) {
 function newsOk(text, headline) {
   if (!headline || charLen(headline) < 8 || (openBracket(headline) && !/…$/.test(headline))) return false;
   if ((headline.match(/[぀-ヿ一-鿿]/g) || []).length < 4) return false;
-  return cleanText(text) && !GRAVE.test(text) && !STATE.test(text) && !SPAM.test(headline);
+  return cleanText(text) && !cruel(text) && !personal(text) && !GRAVE.test(text) && !STATE.test(text) && !SPAM.test(headline);
 }
 
 /* The genre: the account's own when it has one; otherwise the genre the news names with one of its main words. */
@@ -296,6 +298,8 @@ function headOk(text, headline) {
   if ((headline.match(/[぀-ヿ一-鿿]/g) || []).length < 5) return false;
   /* A line dressed up with ＼ ／ or arrows is an advertisement for the account's own page, not a headline. */
   if (/^[＼\\／/▶▷►→↓⇒]|[／/＼\\]$/.test(headline.trim())) return false;
+  /* Never: cruel news, and news that touches one person's honour or private life (filters.mjs). */
+  if (cruel(text) || personal(text)) return false;
   return !NOT_A_HEADLINE.test(text) && !SPAM.test(text) && emojiCount(headline) < 2 && !/質問箱|お届けします|募集中|配信中|放送中|発売中|公開中|好評|詳しくは|こちらから/.test(headline);
 }
 
@@ -714,7 +718,7 @@ async function build(lang) {
   const headFresh = x => Date.now() - Date.parse(x.found || 0) < CONF.headHours * 3600e3;
   const headSeen = new Set();
   const rcNow = new Map(posts.map(p => [p.id, p.replies]));
-  const heads = newHeads.concat(oldHeads.filter(x => headFresh(x) && headOk(x.t, x.t)).map(x => ({ ...x, g: headGenre(anyHandle.get(String(x.h).toLowerCase()), x.t, lang), rc: rcNow.has(x.id) ? rcNow.get(x.id) : (Number(x.rc) || 0) })))
+  const heads = newHeads.concat(oldHeads.filter(x => headFresh(x) && headOk(x.t + ' ' + (x.d || ''), x.t)).map(x => ({ ...x, g: headGenre(anyHandle.get(String(x.h).toLowerCase()), x.t, lang), rc: rcNow.has(x.id) ? rcNow.get(x.id) : (Number(x.rc) || 0) })))
     .sort((x, y) => (Date.parse(y.at || y.found || 0) || 0) - (Date.parse(x.at || x.found || 0) || 0))
     .filter(x => { const k = squash(x.t).slice(0, 24); if (headSeen.has(k)) return false; headSeen.add(k); return true; })
     .slice(0, CONF.headKeep);

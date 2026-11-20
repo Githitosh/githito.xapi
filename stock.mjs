@@ -128,8 +128,9 @@ async function main() {
      genre at most four times. A post of an account a reader asked for (q) plays for that reader only. */
   const pplFile = await readJson(path.join(OUT, 'v1', 'people-ja.json'), {});
   const headById = new Map(heads.map(x => [String(x.id), x]));
+  /* Well-known people's own words first (the most liked first), then what people replied, the newest first. */
   const said = (Array.isArray(pplFile.people) ? pplFile.people : []).map(p => personCard(p, headById.get(String(p.on)))).filter(Boolean)
-    .sort((x, y) => time(y) - time(x));
+    .sort((x, y) => ((y.own || 0) - (x.own || 0)) || (x.own ? y.l - x.l : time(y) - time(x)));
   if (said.length) {
     const d = deal(said, oldNews.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 3 });
     const file = { version: 2, lang: 'ja', made, size: SIZE, cards: said.concat(cards.filter(c => c.q)), videos: d.videos, replies, asked };
@@ -143,7 +144,7 @@ async function main() {
   const oldEn = await readJson(path.join(OUT, 'v1', 'stock-news-en.json'), {});
   const pplEn = await readJson(path.join(OUT, 'v1', 'people-en.json'), {});
   const headEn = new Map((Array.isArray(newsEn.heads) ? newsEn.heads : []).map(x => [String(x.id), x]));
-  const saidEn = (Array.isArray(pplEn.people) ? pplEn.people : []).map(p => personCardEn(p, headEn.get(String(p.on)))).filter(Boolean).sort((x, y) => time(y) - time(x));
+  const saidEn = (Array.isArray(pplEn.people) ? pplEn.people : []).map(p => personCardEn(p, headEn.get(String(p.on)))).filter(Boolean).sort((x, y) => ((y.own || 0) - (x.own || 0)) || (x.own ? y.l - x.l : time(y) - time(x)));
   if (saidEn.length) {
     const d = deal(saidEn, oldEn.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 3 });
     const file = { version: 2, lang: 'en', made, size: SIZE, cards: saidEn, videos: d.videos };

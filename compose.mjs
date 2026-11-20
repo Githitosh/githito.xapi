@@ -109,7 +109,7 @@ const NO_START = '、。，．・：；？！ー）」』】〕”’ぁぃぅ�
 const JA = /[ぁ-ヿ一-鿿]/g;
 const jaCount = t => (String(t || '').match(JA) || []).length;
 /* Emoji, flags, skin tones and the marks that join them. */
-const EMOJI = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{FE0F}\u{200D}\u{20E3}]/gu;
+const EMOJI = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{FE0E}\u{FE0F}\u{200D}\u{20E3}]/gu;
 /* A label a headline starts with: 【速報】, ［独自］, ＼新発売／. */
 const LABEL = /^(?:【[^】]{1,14}】|［[^］]{1,14}］|\[[^\]]{1,14}\]|＼[^／]{1,30}／|〈[^〉]{1,8}〉)\s*/;
 /* An advertisement is no news. */
@@ -312,6 +312,31 @@ export function newsCard(x) {
    their words in two beats (cut where the sentence turns), and their name in the top right corner (nm). Words
    too short to cut give the third beat to what they are talking about, written here (「ガンダムベース」について).
    news: the post they replied to (only its topic is used; the paper is not shown). */
+function halves(text) {
+  /* A space near the middle first (国枝慎吾選手が 世界の… | 誇らしいなあ). */
+  const sp = [...String(text).matchAll(/[ \u3000]+/g)].map(m => [m.index, m.index + m[0].length]);
+  if (sp.length) {
+    const mid = String(text).length / 2;
+    const [a, b] = sp.sort((x, y) => Math.abs(x[0] - mid) - Math.abs(y[0] - mid))[0];
+    const l = String(text).slice(0, a).trim(), r = String(text).slice(b).trim();
+    if (len(l) >= 3 && len(r) >= 3) return [l, r];
+  }
+  let words = [];
+  try { words = [...new Intl.Segmenter('ja', { granularity: 'word' }).segment(text)].map(w => w.segment); } catch (e) { return null; }
+  const n = len(text);
+  if (n < 8 || words.length < 2) return null;
+  let at = 0, best = null;
+  for (let i = 1; i < words.length; i++) {
+    at += len(words[i - 1]);
+    /* Not before hiragana or a mark, and not inside a katakana word (レジェン|ド). */
+    if (/^[ぁ-ゟ]/.test(words[i]) || /^[、。！？!?ー〜）」』]/.test(words[i]) || (/[゠-ヿ]$/.test(words[i - 1]) && /^[゠-ヿ]/.test(words[i]))) continue;
+    const off = Math.abs(at - n / 2);
+    if (!best || off < best.off) best = { off, at };
+  }
+  if (!best || best.at < 3 || n - best.at < 3) return null;
+  const c = [...text];
+  return [c.slice(0, best.at).join('').trim(), c.slice(best.at).join('').trim()];
+}
 const nameOf = (n, h) => { const x = String(n || '').replace(EMOJI, '|').split(/[|｜／/@＠（(【\[]|\s{2,}/)[0].trim(); return len(x) >= 2 ? [...x].slice(0, 14).join('') : '@' + h; };
 export function personCard(p, news) {
   if (!p || !p.id || !p.t || !p.h) return null;
@@ -323,8 +348,14 @@ export function personCard(p, news) {
   let ja = null, how = 'cut';
   if (cut[1] && partOk(fixPart(cut[0]), 'what') && partOk(fixPart(cut[1]), 'what')) ja = [fixPart(cut[0]), fixPart(cut[1])];
   else if (tp) { ja = [words, '「' + tp + '」について']; how = 'about'; }
+  else {
+    /* Their own post with nowhere to turn: its words in two halves, between two words as the dictionary
+       divides them, so the third beat still has words of its own. */
+    const half = halves(words);
+    if (half) { ja = half; how = 'half'; }
+  }
   if (!ja) return null;
-  return { id: String(p.id), h: p.h, nm: nameOf(p.n, p.h), g: (news && news.g) || p.g || '', at: p.at || p.found || '', kw, ...(tp ? { tp } : {}), ja, how: 'person', cut: how, f: p.f || 0, l: p.l || 0 };
+  return { id: String(p.id), h: p.h, nm: nameOf(p.n, p.h), g: (news && news.g) || p.g || '', at: p.at || p.found || '', kw, ...(tp ? { tp } : {}), ja, how: 'person', cut: how, ...(p.own ? { own: 1 } : {}), f: p.f || 0, l: p.l || 0 };
 }
 /* The same in English (people-en.json): their words in two beats, or their words and "About Brexit". */
 export function personCardEn(p, news) {
@@ -338,8 +369,13 @@ export function personCardEn(p, news) {
   let ja = null, how = 'cut';
   if (c[1] && fine(c[0]) && fine(c[1])) ja = [c[0], c[1].charAt(0).toUpperCase() + c[1].slice(1)];
   else if (words.length <= 90 && tp && tp !== 'NEWS') { ja = [words, 'About ' + tp]; how = 'about'; }
+  else {
+    /* Their own post with nowhere to turn: two halves, between two words. */
+    const w = words.split(' ');
+    if (w.length >= 5) { const k = Math.ceil(w.length / 2); ja = [w.slice(0, k).join(' '), w.slice(k).join(' ')]; how = 'half'; }
+  }
   if (!ja) return null;
-  return { id: String(p.id), h: p.h, nm: nameOf(p.n, p.h), g: (news && news.g) || p.g || '', at: p.at || p.found || '', kw, ...(tp && tp !== 'NEWS' ? { tp } : {}), ja, how: 'person', cut: how, lang: 'en', f: p.f || 0, l: p.l || 0 };
+  return { id: String(p.id), h: p.h, nm: nameOf(p.n, p.h), g: (news && news.g) || p.g || '', at: p.at || p.found || '', kw, ...(tp && tp !== 'NEWS' ? { tp } : {}), ja, how: 'person', cut: how, lang: 'en', ...(p.own ? { own: 1 } : {}), f: p.f || 0, l: p.l || 0 };
 }
 
 /* ---------- News in English ---------- */

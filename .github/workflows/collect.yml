@@ -77,6 +77,9 @@ jobs:
             echo "The memo is read from the private repository."
           else
             echo "The private repository could not be read: the memo is not kept in this run."
+            # Said on the run's own page too, so that the owner sees it without reading the log.
+            echo "### 記録（非公開リポジトリ）" >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ 非公開リポジトリ ${MEMO_REPO} を読めなかったため、この実行ではアカウントの記録をしていません。Secret の MEMO_TOKEN が無効（作り直したのに貼り替えていない、期限切れ、貼り付けの欠け）か、トークンにこのリポジトリの Contents の読み書き権限がありません。" >> "$GITHUB_STEP_SUMMARY"
           fi
       # Requests the owner sent as issues ("account": the accounts whose replies the News page may play,
       # saved only in the private memo; "talk"): read first, so that this run already collects for them.
@@ -118,8 +121,14 @@ jobs:
           git add -A
           if git diff --cached --quiet; then echo "The memo did not change."; exit 0; fi
           git commit -q -m "Memo $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push -q "https://x-access-token:${MEMO_TOKEN}@github.com/${MEMO_REPO}.git" HEAD:main
-          echo "The memo is saved in the private repository."
+          echo "### 記録（非公開リポジトリ）" >> "$GITHUB_STEP_SUMMARY"
+          if git push -q "https://x-access-token:${MEMO_TOKEN}@github.com/${MEMO_REPO}.git" HEAD:main; then
+            echo "The memo is saved in the private repository."
+            echo "✅ アカウントの記録を非公開リポジトリ ${MEMO_REPO} に保存しました。" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The memo could not be saved in the private repository."
+            echo "⚠️ 非公開リポジトリ ${MEMO_REPO} に保存できませんでした。MEMO_TOKEN に Contents の「Read and write」権限があるか確かめてください。" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Publish the humor stories
         if: ${{ !inputs.only || inputs.only == 'humor' }}
         run: |

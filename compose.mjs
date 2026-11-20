@@ -282,36 +282,41 @@ export const GREET = /おはよ[うー〜ぉっんー]*|おはおは|おっは�
 export const LOVE = /大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|好き|すき|しゅき|愛してる|あいしてる|会いたい|あいたい|ぎゅー*|ちゅー*|なでなで|よしよし|かわいい|可愛い|かわゆ|かっこいい|嬉しい|うれしい|ありがと[うー〜]*|♡|❤|💕|🥰|😘|love you|miss you|\bbabe\b/i;
 /* The part of a message the card opens on: its greeting, else its loving word, else its first phrase,
    else its keyword. Letters only (no emoji, no faces), ten at most. */
-/* The letter a greeting or a loving word stands for, when the message is no more than that word: the first
-   beat then shows that letter, not the whole message again (おはよ〜 → 朝). */
-const WORD_KANJI = [[/おはよ|おはおは|おっはー|good ?morning/i, '朝'], [/おやす|おやぴ|ねんね|こんばんは|good ?night|night night|sweet dreams/i, '夜'],
-  [/おかえり|ただいま|ただまー|welcome/i, '帰'], [/いってらっしゃい|いってきます|いてら/, '行'], [/お疲れ|おつかれ/, '労'], [/こんにちは/, '昼'],
-  [/愛してる|あいしてる/, '愛'], [/会いたい|あいたい|miss you/i, '会'], [/大好き|だいすき|だいしゅき|好き|すき|しゅき|love/i, '好'], [/ぎゅ/, '抱'],
-  [/ちゅ|kiss/i, '恋'], [/なでなで|よしよし/, '撫'], [/かわいい|可愛い|かわゆ|cute/i, '可愛'], [/かっこいい|カッコいい/, '格好'], [/嬉しい|うれしい/, '嬉'], [/ありがと|thank/i, '感謝']];
-const KIND_KANJI = { morning: '朝', night: '夜', home: '帰', love: '恋', icha: '愛', miss: '会', other: '話' };
 const LOVING = /(?:大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|愛してる|あいしてる|会いたい|あいたい|ぎゅー+|ちゅー+|なでなで|よしよし|かわいい|可愛い|かっこいい|嬉しい|うれしい|好き|すき|しゅき)(?!では|じゃ|じゃな|くな|にな[れら]な)/;
-/* The part of a message the card opens on (the first beat, large). Never the whole message:
+/* The part of a message the card opens on (the first beat, large). Always letters taken from the message
+   itself, as they are written there (no theme, no word of our own), and never the whole of it:
      1. its greeting (おはよ), else its loving word (大好き), when the message says more than that;
      2. else the kanji its first word begins with (痩せても落ちない → 痩, 禁酒する → 禁酒, 学び → 学);
-     3. else its first katakana word (ポニテ);
-     4. else the letter its greeting or loving word stands for (おはよ〜 → 朝, 大好き♡ → 好), or the one for its
-        kind of talk (kind: morning 朝, night 夜, home 帰, love 恋…). */
-export function excerptOf(text, kind) {
+     3. a greeting or loving word that is the whole message: a shorter form of it written there (おはよ〜 → おは,
+        おつかれさまぁ → おつかれ, 大好き♡ → 好き, おやすみ！ → おやす);
+     4. else its first katakana word (ポニテ), else its longest word;
+     5. else the first half of it (おかえり → おか); a message of emoji alone: its first emoji. */
+const CORES = ['おはよ', 'おは', 'おやす', 'おつかれ', 'お疲れ', 'おかえり', 'いってら', 'ただいま', 'こんばん', '好き', 'すき', 'しゅき', '愛して', '愛', '会いた', 'ぎゅ', 'ちゅ', 'かわい', '可愛', '嬉し', 'うれし', 'ありがと', 'morning', 'night', 'love'];
+export function excerptOf(text) {
   const plain = String(text || '').replace(EMOJI, ' ').replace(/[^ぁ-ヿ一-鿿々A-Za-z0-9ー〜！？!?♡、。\s]+/g, ' ').replace(/\s+/g, ' ').trim();
   const bare = t => String(t || '').replace(/[^ぁ-ゞァ-ヾ一-鿿々A-Za-z0-9]/g, '');
   const whole = bare(plain);
-  /* A part is less than the whole when two letters or more of the message are left out. */
-  const part = x => { const n = bare(x); return n && len(n) <= len(whole) - 2 ? x : ''; };
+  /* A part has fewer letters than the message (two fewer, when the message is longer than five). */
+  const part = x => { const n = bare(x); return n && len(n) <= len(whole) - (len(whole) > 5 ? 2 : 1) ? x.trim() : ''; };
   const grab = re => { const m = plain.match(re); return m ? (m[0] + (plain.slice(m.index + m[0].length).match(/^[ー〜！!♡]{1,2}/) || [''])[0]).trim() : ''; };
   let x = part(grab(GREET)) || part(grab(LOVING));
+  let words = [];
+  try { words = [...new Intl.Segmenter('ja', { granularity: 'word' }).segment(plain)].filter(w => w.isWordLike).map(w => w.segment); } catch (e) { words = plain.split(/[\s、。！？!?]+/).filter(Boolean); }
   if (!x) {
-    let words = [];
-    try { words = [...new Intl.Segmenter('ja', { granularity: 'word' }).segment(plain)].filter(w => w.isWordLike).map(w => w.segment); } catch (e) { words = []; }
     const kanji = words.map(w => (w.match(/^[一-鿿々]{1,4}/) || [''])[0]).find(k => k && !PLAIN_WORD.test(k));
-    x = part(kanji || '') || part((words.find(w => /^[゠-ヿ]{2,8}$/.test(w)) || ''));
+    /* (Not the kanji of a loving word cut short: 大好き is 好き, not 大好.) */
+    if (kanji && !LOVING.test(plain)) x = part(kanji);
   }
-  if (!x) x = (WORD_KANJI.find(([re]) => re.test(plain)) || [null, ''])[1] || KIND_KANJI[kind] || '話';
-  return [...x].slice(0, 10).join('');
+  if (!x) for (const core of CORES) { const i = plain.toLowerCase().indexOf(core.toLowerCase()); if (i >= 0 && (x = part(plain.slice(i, i + core.length)))) break; }
+  if (!x) x = part(words.find(w => /^[゠-ヿ]{2,8}$/.test(w)) || '') || part(words.filter(w => len(bare(w)) >= 2).sort((p, q) => len(q) - len(p))[0] || '');
+  if (!x) {
+    /* One word: its first half, two letters at least. */
+    const c = [...whole];
+    x = c.length >= 2 ? c.slice(0, Math.max(1, Math.min(c.length - 1, Math.ceil(c.length / 2)))).join('') : '';
+  }
+  /* Emoji alone: the first of them. */
+  if (!x && !whole) { try { x = [...new Intl.Segmenter('ja', { granularity: 'grapheme' }).segment(String(text || '').trim())].map(g => g.segment)[0] || ''; } catch (e) { x = ''; } }
+  return [...(x || '')].slice(0, 10).join('');
 }
 /* A conversation: its messages in order, each a card { i (the post's number), h (who wrote it), to (whom
    it answers), ja: [the part, the whole] }. gl: 2 for a greeting said with love, 1 for either, 0 for
@@ -323,7 +328,10 @@ export function talkCards(s) {
   for (const [k, x] of msgs.entries()) {
     const full = tidyTalk(x.x);
     if (!full || slander(full) || cruel(full) || alcohol(full) || tobacco(full)) return null;
-    m.push({ i: String(x.i || ''), h: x.h, ...(k ? { to: msgs[k - 1].h } : {}), ja: [excerptOf(full, s.kind), full] });
+    /* A message too short to take a part from (な！) leaves the talk out: its first beat would be the whole. */
+    const first = excerptOf(full);
+    if (!first) return null;
+    m.push({ i: String(x.i || ''), h: x.h, ...(k ? { to: msgs[k - 1].h } : {}), ja: [first, full] });
   }
   if (m.length < 2 || m[0].h === m[1].h) return null;
   const all = m.map(x => x.ja[1]).join(' ');
@@ -337,5 +345,5 @@ export function replyCard(x, post) {
   const r = tidyTalk(x.t);
   if (!r || slander(r) || cruel(r) || alcohol(r) || tobacco(r)) return null;
   const on = fixPart(len(post.t) > 30 ? shorten(tidyNews(post.t), 30) || tidyNews(post.t) : tidyNews(post.t));
-  return { id: String(x.id), ask: post.h, at: x.at || '', a: { h: post.h, i: String(x.n) }, b: { h: x.h, i: String(x.id) }, kw: excerptOf(r, 'other'), ja: [excerptOf(r, 'other'), r], on };
+  return { id: String(x.id), ask: post.h, at: x.at || '', a: { h: post.h, i: String(x.n) }, b: { h: x.h, i: String(x.id) }, kw: excerptOf(r), ja: [excerptOf(r), r], on };
 }

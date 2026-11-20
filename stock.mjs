@@ -1,7 +1,8 @@
 /* stock.mjs: the video stock. After every collection (every half hour) the cards are written from what was
    collected (compose.mjs: the words checked, and mended where they could be), and the cards are dealt into
-   videos of ten. A video is made only when ten new cards are there; the videos made before stay as they
-   were while their cards are still in the files. About a hundred videos are kept, the newest first.
+   videos of ten. A video is made only when ten new cards are there. What a run already put in the stock
+   stays: the next run adds the latest posts, and the videos and their cards are not thrown away when the
+   posts leave the collection files (those files keep a few days; the stock the pages play keeps growing).
 
      v1/stock-news-ja.json   News: cards { id, h, n, g, at, kw, ja: [what, who], how, q? }
      v1/stock-news-en.json   News in English: cards written from English news (english.mjs; nothing translated)
@@ -15,7 +16,8 @@
    The pages read these files and nothing else: they make no words of their own. A reader's page plays the
    newest video it has not played, or picks among the cards when the reader chose genres or words.
 
-     node stock.mjs --out public [--videos 100] [--size 10] */
+     node stock.mjs --out public [--videos N] [--size 10]
+   --videos N keeps only the N newest videos. Without it, nothing is cut: the stock grows. */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { newsCard, talkCards, replyCard, personCard, personCardEn } from './compose.mjs';
@@ -23,24 +25,54 @@ import { newsCard, talkCards, replyCard, personCard, personCardEn } from './comp
 const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 const OUT = path.resolve(opt('out', 'public'));
-const MAX = Number(opt('videos', 100)) || 100;
+/* 0: do not cut the stock. A positive --videos keeps only that many of the newest videos. */
+const videosOpt = opt('videos', '');
+const MAX = videosOpt === '' ? 0 : Math.max(0, Number(videosOpt) || 0);
 const SIZE = Number(opt('size', 10)) || 10;
 const readJson = async (file, d) => { try { return JSON.parse(await readFile(file, 'utf8')); } catch (e) { return d; } };
 const time = x => Date.parse(x && x.at) || 0;
+const bounded = (list, max) => (max > 0 ? list.slice(0, max) : list);
+/* A card or a talk already in the stock is kept. This run's copy of the same id replaces it.
+   Nothing is dropped for age. */
+function mergeStock(oldItems, freshItems, idOf) {
+  const map = new Map();
+  for (const item of oldItems) {
+    const id = String(idOf(item) || '');
+    if (id) map.set(id, item);
+  }
+  let added = 0;
+  for (const item of freshItems) {
+    const id = String(idOf(item) || '');
+    if (!id) continue;
+    if (!map.has(id)) added++;
+    map.set(id, item);
+  }
+  return { items: [...map.values()], added, carried: map.size - added };
+}
+const cardKeep = c => c && c.id != null && Array.isArray(c.ja) && c.ja[0] && c.ja[1];
+const talkKeep = t => t && t.i != null && Array.isArray(t.m) && t.m.length >= 2 && t.m.every(x => x && Array.isArray(x.ja) && x.ja[0] && x.ja[1]);
+/* This run's cards, plus every card the stock already held. Own words first, then the newest. */
+function peopleCards(fresh, oldCards) {
+  const carried = (Array.isArray(oldCards) ? oldCards : []).filter(c => cardKeep(c) && !c.q);
+  const merged = mergeStock(carried, fresh, c => c.id);
+  const said = merged.items.sort((x, y) => ((y.own || 0) - (x.own || 0)) || (x.own ? (Number(y.l) || 0) - (Number(x.l) || 0) : time(y) - time(x)));
+  return { said, added: merged.added, carried: merged.carried };
+}
 
 /* Cards into videos. cards: in the order they should play (the first first). person(card): the accounts
    a card shows (nobody twice in a video); group(card): its genre or kind (at most cap of one in a video;
-   the same one is not shown twice in a row). Videos whose cards are all still here are kept. */
+   the same one is not shown twice in a row). Videos whose cards are all still here are kept, and new
+   videos are added. max > 0 keeps only that many of the newest; 0 keeps every video. */
 function deal(cards, before, { person, group, cap, tag, max = MAX, tail, version }) {
   const byId = new Map(cards.map(c => [c.id, c]));
   const known = new Set(byId.keys());
   if (tail) tail.pool.forEach(c => known.add(c.id));
   /* A video made by an older version of this program is made again. */
-  const kept = (Array.isArray(before) ? before : []).filter(v => v && Array.isArray(v.c) && v.c.length && (v.v || 1) === (version || 1) && v.c.every(id => known.has(id))).slice(0, max);
+  const kept = bounded((Array.isArray(before) ? before : []).filter(v => v && Array.isArray(v.c) && v.c.length && (v.v || 1) === (version || 1) && v.c.every(id => known.has(id))), max);
   const used = new Set(kept.flatMap(v => v.c));
-  /* With the stock full, only cards newer than its oldest video make new videos (older ones would be
-     dealt, and dropped again, at every run). */
-  const oldest = kept.length >= max ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
+  /* A cap that is already full takes only cards newer than its oldest video (older ones would be
+     dealt, and dropped again, at every run). With no cap, every card not yet in a video can join one. */
+  const oldest = max > 0 && kept.length >= max ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
   let free = cards.filter(c => !used.has(c.id) && time(c) > oldest);
   /* tail: cards that close each video (what people said, three in ten), each used once. */
   const tails = tail ? tail.pool.filter(c => !used.has(c.id)) : [];
@@ -81,7 +113,7 @@ function deal(cards, before, { person, group, cap, tag, max = MAX, tail, version
     order.push(...end);
     made.push({ i: 'v' + stamp + made.length.toString(36), ...(version ? { v: version } : {}), at: order.reduce((m, c) => (time(c) > Date.parse(m || 0) ? c.at : m), ''), ...(tag ? tag(order) : {}), c: order.map(c => c.id) });
   }
-  const videos = kept.concat(made).sort((x, y) => (Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0)).slice(0, max);
+  const videos = bounded(kept.concat(made).sort((x, y) => (Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0)), max);
   const now = new Set(videos.map(v => v.i));
   return { videos, made: made.filter(v => now.has(v.i)).length, kept: kept.filter(v => now.has(v.i)).length, waiting: free.length };
 }
@@ -117,41 +149,42 @@ async function main() {
   const heads = Array.isArray(news.heads) ? news.heads : [];
   const cards = [];
   const seen = new Set();
-  const how = {};
   for (const x of heads) {
     const c = newsCard(x);
     if (!c || seen.has(c.id) || seen.has(c.ja.join('|'))) continue;
     seen.add(c.id); seen.add(c.ja.join('|'));
-    how[c.how] = (how[c.how] || 0) + 1;
     cards.push(c);
   }
   cards.sort((x, y) => time(y) - time(x));
-  /* News: what people said (people.mjs), a person a card, the newest first; videos of ten, nobody twice, a
-     genre at most four times. A post of an account a reader asked for (q) plays for that reader only. */
+  /* News: what people said (people.mjs), a person a card. Videos of ten, nobody twice, a genre at most
+     four times. Cards and videos already in the stock stay; this run's posts are added. A post of an
+     account a reader asked for (q) plays for that reader only. */
   const pplFile = await readJson(path.join(OUT, 'v1', 'people-ja.json'), {});
   const headById = new Map(heads.map(x => [String(x.id), x]));
-  /* Well-known people's own words first (the most liked first), then what people replied, the newest first. */
-  const said = (Array.isArray(pplFile.people) ? pplFile.people : []).map(p => personCard(p, headById.get(String(p.on)))).filter(Boolean)
-    .sort((x, y) => ((y.own || 0) - (x.own || 0)) || (x.own ? y.l - x.l : time(y) - time(x)));
+  const freshSaid = (Array.isArray(pplFile.people) ? pplFile.people : []).map(p => personCard(p, headById.get(String(p.on)))).filter(Boolean);
+  const { said, added, carried } = peopleCards(freshSaid, oldNews.cards);
+  const askedCards = mergeStock((Array.isArray(oldNews.cards) ? oldNews.cards : []).filter(c => c && c.q && cardKeep(c)), cards.filter(c => c.q), c => c.id).items;
   if (said.length) {
     const d = deal(said, oldNews.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 3 });
-    const file = { version: 2, lang: 'ja', made, principles, size: SIZE, cards: said.concat(cards.filter(c => c.q)), videos: d.videos, replies, asked };
+    const file = { version: 2, lang: 'ja', made, principles, size: SIZE, cards: said.concat(askedCards), videos: d.videos, replies, asked };
     if (await save('stock-news-ja.json', file)) changed = true;
     const cuts = {}; said.forEach(c => { cuts[c.cut] = (cuts[c.cut] || 0) + 1; });
-    console.log(`News: ${said.length} cards of what people said ${JSON.stringify(cuts)} (${how && Object.keys(how).length ? 'the papers\' headlines are not shown' : ''}); videos: ${d.videos.length} (${d.made} new, ${d.kept} kept), ${d.waiting} cards wait for the next video; ${replies.length} replies to asked accounts.`);
+    console.log(`News: ${said.length} cards of what people said (${added} added this run, ${carried} already in the stock) ${JSON.stringify(cuts)}; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept), ${d.waiting} cards wait for the next video; ${replies.length} replies to asked accounts.`);
   } else console.log('News: nobody\'s words yet.');
 
-  /* News in English: what people said under English news (people-en.json), in English as written. */
+  /* News in English: what people said under English news (people-en.json), in English as written.
+     The same stock: this run adds, and what was already collected stays. */
   const newsEn = await readJson(path.join(OUT, 'v1', 'news-en.json'), {});
   const oldEn = await readJson(path.join(OUT, 'v1', 'stock-news-en.json'), {});
   const pplEn = await readJson(path.join(OUT, 'v1', 'people-en.json'), {});
   const headEn = new Map((Array.isArray(newsEn.heads) ? newsEn.heads : []).map(x => [String(x.id), x]));
-  const saidEn = (Array.isArray(pplEn.people) ? pplEn.people : []).map(p => personCardEn(p, headEn.get(String(p.on)))).filter(Boolean).sort((x, y) => ((y.own || 0) - (x.own || 0)) || (x.own ? y.l - x.l : time(y) - time(x)));
-  if (saidEn.length) {
-    const d = deal(saidEn, oldEn.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 3 });
-    const file = { version: 2, lang: 'en', made, principles, size: SIZE, cards: saidEn, videos: d.videos };
+  const freshEn = (Array.isArray(pplEn.people) ? pplEn.people : []).map(p => personCardEn(p, headEn.get(String(p.on)))).filter(Boolean);
+  const en = peopleCards(freshEn, oldEn.cards);
+  if (en.said.length) {
+    const d = deal(en.said, oldEn.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 3 });
+    const file = { version: 2, lang: 'en', made, principles, size: SIZE, cards: en.said, videos: d.videos };
     if (await save('stock-news-en.json', file)) changed = true;
-    console.log(`News in English: ${saidEn.length} cards of what people said; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept).`);
+    console.log(`News in English: ${en.said.length} cards of what people said (${en.added} added this run, ${en.carried} already in the stock); videos: ${d.videos.length} (${d.made} new, ${d.kept} kept).`);
   } else console.log('News in English: nobody\'s words yet.');
 
   /* Reply News: a video is conversations, whole, about ten messages: greetings said with love first, then
@@ -159,19 +192,33 @@ async function main() {
      morning, take care and welcome home, loving talk, good night). A video of mostly morning greetings is
      marked m (the page plays those in the morning). */
   const stories = Array.isArray(humor.stories) ? humor.stories : [];
-  if (stories.length) {
-    const seenMsg = new Set();
-    const talks = stories.map(talkCards).filter(t => t && !t.m.some(x => x.i && seenMsg.has(x.i)) && (t.m.forEach(x => x.i && seenMsg.add(x.i)), true));
-    const rank = t => t.gl * 100 + Math.min(t.m.length, 8) * 6 + t.s;
+  const seenMsg = new Set();
+  const freshTalks = stories.map(talkCards).filter(t => t && talkKeep(t) && !t.m.some(x => x.i && seenMsg.has(x.i)) && (t.m.forEach(x => x.i && seenMsg.add(x.i)), true));
+  const carriedTalks = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).filter(talkKeep);
+  /* A talk already in a video claims its messages first, so that video is not broken by a new copy of the same lines. */
+  const freshIds = new Set(freshTalks.map(t => String(t.i)));
+  const carriedIds = new Set(carriedTalks.map(t => String(t.i)));
+  const inVideo = new Set((Array.isArray(oldHumor.videos) ? oldHumor.videos : []).flatMap(v => (v && v.c || []).map(String)));
+  const mergedTalks = mergeStock(carriedTalks, freshTalks, t => t.i);
+  const talkSeen = new Set();
+  const talks = [];
+  const claimOrder = mergedTalks.items.slice().sort((a, b) => (inVideo.has(String(a.i)) ? 0 : 1) - (inVideo.has(String(b.i)) ? 0 : 1));
+  for (const t of claimOrder) {
+    if (t.m.some(x => x.i && talkSeen.has(String(x.i)))) continue;
+    t.m.forEach(x => x.i && talkSeen.add(String(x.i)));
+    talks.push(t);
+  }
+  if (talks.length) {
+    const rank = t => t.gl * 100 + Math.min(t.m.length, 8) * 6 + (Number(t.s) || 0);
     talks.sort((x, y) => (rank(y) - rank(x)) || (time(y) - time(x)));
-    const byId = new Map(talks.map(t => [t.i, t]));
-    const kept = (Array.isArray(oldHumor.videos) ? oldHumor.videos : []).filter(v => v && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(id))).slice(0, MAX);
-    const used = new Set(kept.flatMap(v => v.c));
-    const oldest = kept.length >= MAX ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
-    let free = talks.filter(t => !used.has(t.i) && time(t) > oldest);
+    const byId = new Map(talks.map(t => [String(t.i), t]));
+    const kept = bounded((Array.isArray(oldHumor.videos) ? oldHumor.videos : []).filter(v => v && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(String(id)))), MAX);
+    const used = new Set(kept.flatMap(v => v.c.map(String)));
+    const oldest = MAX > 0 && kept.length >= MAX ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
+    let free = talks.filter(t => !used.has(String(t.i)) && time(t) > oldest);
     const DAY = { morning: 0, home: 1, love: 2, icha: 2, miss: 2, other: 2, night: 3 };
     const stamp = Date.now().toString(36);
-    const made = [];
+    const built = [];
     while (free.reduce((n, t) => n + t.m.length, 0) >= SIZE - 2) {
       const v = [];
       const people = new Set();
@@ -192,17 +239,16 @@ async function main() {
       const morningMsgs = v.filter(t => t.k === 'morning').reduce((c, t) => c + t.m.length, 0);
       /* g: how much of the video is greetings said with love (0 to 2). */
       const g = Math.round(v.reduce((c, t) => c + t.gl * t.m.length, 0) / n * 10) / 10;
-      made.push({ i: 'v' + stamp + made.length.toString(36), at: v.reduce((m, t) => (time(t) > Date.parse(m || 0) ? t.at : m), ''), g, ...(morningMsgs * 2 > n ? { m: 1 } : {}), c: v.map(t => t.i) });
+      built.push({ i: 'v' + stamp + built.length.toString(36), at: v.reduce((m, t) => (time(t) > Date.parse(m || 0) ? t.at : m), ''), g, ...(morningMsgs * 2 > n ? { m: 1 } : {}), c: v.map(t => t.i) });
     }
-    /* Greetings said with love first, then the newest. */
-    const videos = kept.concat(made).sort((x, y) => (Math.round((y.g || 0) * 2) - Math.round((x.g || 0) * 2)) || ((Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0))).slice(0, MAX);
-    const inVideos = new Set(videos.flatMap(v => v.c));
-    const shown = talks.filter(t => inVideos.has(t.i)).concat(talks.filter(t => !inVideos.has(t.i)).slice(0, 100));
-    const file = { version: 2, lang: 'ja', made, principles, size: SIZE, talks: shown, videos, replies, asked };
+    /* Greetings said with love first, then the newest. Every video stays unless --videos sets a cap. */
+    const videos = bounded(kept.concat(built).sort((x, y) => (Math.round((y.g || 0) * 2) - Math.round((x.g || 0) * 2)) || ((Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0))), MAX);
+    const file = { version: 2, lang: 'ja', made, principles, size: SIZE, talks, videos, replies, asked };
     if (await save('stock-humor-ja.json', file)) changed = true;
     const msgs = {}; talks.forEach(t => { msgs[t.m.length] = (msgs[t.m.length] || 0) + 1; });
     const gl = [0, 1, 2].map(g => talks.filter(t => t.gl === g).length);
-    console.log(`Reply News: ${talks.length} talks from ${stories.length} stories (messages per talk ${JSON.stringify(msgs)}; greeting with love ${gl[2]}, one of the two ${gl[1]}, neither ${gl[0]}); videos: ${videos.length} (${made.filter(v => videos.includes(v)).length} new, ${videos.filter(v => v.m).length} of the morning).`);
+    const addedN = talks.filter(t => freshIds.has(String(t.i)) && !carriedIds.has(String(t.i))).length;
+    console.log(`Reply News: ${talks.length} talks (${addedN} added this run, ${talks.length - addedN} already in the stock; messages per talk ${JSON.stringify(msgs)}; greeting with love ${gl[2]}, one of the two ${gl[1]}, neither ${gl[0]}); videos: ${videos.length} (${built.filter(v => videos.includes(v)).length} new, ${kept.filter(v => videos.includes(v)).length} kept, ${videos.filter(v => v.m).length} of the morning).`);
   } else console.log('Reply News: no stories yet.');
 
   if (changed) await writeFile(path.join(OUT, '.changed'), made + '\n');

@@ -30,7 +30,7 @@ on:
         type: string
         default: ''
       chain:
-        description: 'Start the next run when this one is done (the hourly chain)'
+        description: 'Start the next run when this one is done (the half-hour chain)'
         type: boolean
         default: false
       note:

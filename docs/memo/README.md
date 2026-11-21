@@ -17,8 +17,8 @@
 
 ## ユーモア（非公開）
 
-一覧は非公開リポジトリ `githito.memo`（または変数 `MEMO_REPO`）のルートの `humor-accounts.json` だけです。
-`humor-find.mjs` が約30分ごとに追記し、MEMO_TOKEN で書き戻します。
-アカウント名は公開の README・実行ログ・`api` ブランチには出しません。
+一覧は非公開リポジトリ `githito.memo`（または変数 `MEMO_REPO`）のルートの `humor-accounts.json` だけです（旧名 `humor-memo-*.json` は使わず、この1ファイルに揃えます）。
+`humor-find.mjs` が約30分ごとに約50件追記し（カップル寄り優先・目標おおよそ2000件）、MEMO_TOKEN で書き戻します。
+アカウント名は公開の README・実行ログ・`api` ブランチ・ユーモア動画には出しません（本文のみ）。
 
 ニュースとユーモアの一覧は混ぜません。

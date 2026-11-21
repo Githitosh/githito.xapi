@@ -124,13 +124,14 @@ jobs:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node collect.mjs --out public
-      # Humor: first record ~20 new romantic-reply accounts into humor-accounts.json (humor-find.mjs),
-      # then read only those registered accounts' timelines/conversations (humor.mjs) for ~100 stories.
+      # Humor: first record ~50 new clearly-romantic-reply accounts into humor-accounts.json (humor-find.mjs),
+      # then read only those registered accounts' timelines/conversations (humor.mjs) for ~160 stories.
+      # Stock is text-only (no handles); ordinary replies are pruned on every run.
       # The memo was read above. It needs two things set once by the owner: a private repository named
       # githito.memo (or the name in the repository variable MEMO_REPO, "owner/name"), and the secret
       # MEMO_TOKEN, a fine-grained token that may read and write that repository's contents. Without the
       # secret nothing is remembered and an account list is not saved.
-      - name: Humor accounts (about 10 new each run; or ~500/lang when bootstrap)
+      - name: Humor accounts (about 50 new each run; or ~800/lang when bootstrap; aim ~2000 total)
         if: ${{ !inputs.only || inputs.only == 'humor' }}
         continue-on-error: true
         env:
@@ -141,7 +142,7 @@ jobs:
         continue-on-error: true
         env:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
-        run: node humor.mjs --out public ${{ inputs.bootstrap && '--minutes 25' || '' }}
+        run: node humor.mjs --out public ${{ inputs.bootstrap && '--minutes 28' || '' }}
       - name: Save the memo (the private repository)
         if: ${{ env.XAPI_MEMO_DIR != '' }}
         continue-on-error: true

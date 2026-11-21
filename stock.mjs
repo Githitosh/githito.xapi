@@ -6,15 +6,15 @@
 
      v1/stock-news-ja.json   News: cards { id, h, n, g, at, kw, ja: [what, who], how, q? }
      v1/stock-news-en.json   News in English: cards from registered English accounts (nothing translated)
-     v1/stock-humor-ja.json  Reply News: talks { i, k, at, s, gl, m: [{ i, s, ja: [part, whole] }] }
-                             (a talk is a conversation; a message is a card; no account handles — privacy)
+     v1/stock-humor-ja.json  Reply News: talks { i, k, at, s, gl, m: [{ i, s, h: "s0", to?, ja: [part, whole] }] }
+                             (a talk is a conversation; h/to are opaque speaker ids "s0"/"s1", never real @handles)
      both: videos [{ i, at, c: [card or talk ids], m?, slot? }], replies (to the accounts readers asked for), asked
 
    News cards are the private memo's accounts' own posts only (news-famous.json → people.mjs). A card
    that is not their own post, or whose account is not in that file, is dropped and is not refilled.
-   Humor talks are humor-accounts.json only: a talk with nobody on that list is dropped. When either
-   list is missing or empty, that stock is cleared (empty cards/talks and videos): pages must not keep
-   showing unregistered content. Humor also rejudges past talks: ordinary replies without clear romantic
+   Humor talks are humor-accounts.json only: a talk with nobody on that list is dropped. When the humor
+   list is missing, existing anonymized talks/videos are kept (not wiped). News still clears when its
+   memo list is missing. Humor also rejudges past talks: ordinary replies without clear romantic
    feeling (hearts / love words / funny romantic greetings) are pruned on every run.
 
    News stock aims at about 2000 cards (~5 per registered account). Playback packing prefers unused cards,
@@ -49,25 +49,38 @@ function pruneRomanticTalk(t, lang = 'ja') {
   if (!m.some(x => clearlyRomantic(msgText(x), lang))) return null;
   return { ...t, m };
 }
-/* Public humor stock: comment text only (opaque speaker index s). No handles or profile names. */
+/* Public humor stock: comment text only. No real account handles or profile names.
+   Speakers are opaque indices. news-shorts still requires message.h (stockGood / romanceCards),
+   so we publish h as "s0", "s1", … — not a real @handle — and to as the previous speaker's opaque id. */
 function anonymizeTalk(t) {
   if (!t || !Array.isArray(t.m)) return null;
   const speakers = new Map();
   let n = 0;
   const sid = h => {
     const k = String(h == null ? '' : h).toLowerCase();
+    /* Already-opaque keys from a prior publish ("s0") keep their index. */
+    if (/^s\d+$/.test(k)) {
+      const i = Number(k.slice(1));
+      if (!speakers.has(k)) speakers.set(k, i);
+      if (i >= n) n = i + 1;
+      return speakers.get(k);
+    }
     if (!k) return n;
     if (!speakers.has(k)) speakers.set(k, n++);
     return speakers.get(k);
   };
-  const m = t.m.map(x => {
+  const m = [];
+  for (const x of t.m) {
     const key = x.h != null ? x.h : (x.s != null ? 's' + x.s : '');
-    return { i: String(x.i || ''), s: sid(key), ja: x.ja };
-  });
+    const s = sid(key);
+    const h = 's' + s;
+    m.push({ i: String(x.i || ''), s, h, ...(m.length ? { to: m[m.length - 1].h } : {}), ja: x.ja });
+  }
   if (m.length < 2 || m[0].s === m[1].s) return null;
   return { i: t.i, k: t.k || '', at: t.at || '', s: t.s, gl: t.gl, m };
 }
 const speakerKey = x => (x && x.h != null ? String(x.h).toLowerCase() : (x && x.s != null ? 's' + x.s : ''));
+const isOpaqueSpeaker = h => /^s\d+$/i.test(String(h || ''));
 
 const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -320,12 +333,12 @@ async function main() {
      ordinary replies without clear romantic feeling are pruned; published talks never include handles. */
   const humorMemo = await humorAccounts(opt('memo', process.env.XAPI_MEMO_DIR || ''));
   const humorReady = !humorMemo.missing && humorMemo.handles.size > 0;
-  /* Handles present → every author must be on the memo. Opaque speaker index (privacy v3+) → already filtered upstream. */
+  /* Real handles → every author must be on the memo. Opaque "s0"/"s1" (or s index) → already filtered upstream. */
   const humorAllow = t => {
     if (!t || !Array.isArray(t.m) || t.m.length < 2) return false;
     const keyed = t.m.every(x => x && (x.h || x.s != null));
     if (!keyed) return false;
-    if (t.m.every(x => x.h && !String(x.h).startsWith('s'))) {
+    if (t.m.every(x => x.h && !isOpaqueSpeaker(x.h))) {
       return t.m.every(x => humorMemo.handles.has(String(x.h).replace(/^@+/, '').toLowerCase()));
     }
     return true;
@@ -333,9 +346,14 @@ async function main() {
   const stories = Array.isArray(humor.stories) ? humor.stories : [];
   const seenMsg = new Set();
   if (!humorReady) {
-    const file = { version: 3, lang: 'ja', made, principles, size: SIZE, privacy: 'text-only', talks: [], videos: [], replies, asked };
+    /* Memo briefly missing must not wipe Reply News. Keep last stock, strip any leftover real handles. */
+    const keptTalks = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).map(anonymizeTalk).filter(talkKeep);
+    const byId = new Set(keptTalks.map(t => String(t.i)));
+    const keptVideos = (Array.isArray(oldHumor.videos) ? oldHumor.videos : [])
+      .filter(v => v && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(String(id))));
+    const file = { version: 3, lang: 'ja', made, principles, size: SIZE, privacy: 'text-only', talks: keptTalks, videos: keptVideos, replies, asked };
     if (await save('stock-humor-ja.json', file)) changed = true;
-    console.log('Reply News: humor-accounts.json is missing or empty, so the humor stock was cleared (unregistered talks must not stay).');
+    console.log(`Reply News: humor-accounts.json is missing or empty; kept ${keptTalks.length} anonymized talks / ${keptVideos.length} videos (not cleared).`);
   } else {
     const jstH = iso => { const ms = Date.parse(iso || 0); return ms ? new Date(ms + 9 * 3600e3).getUTCHours() : -1; };
     const slotOfHour = h => (h >= 4 && h < 11 ? 'morning' : (h >= 21 || (h >= 0 && h < 4) ? 'night' : 'day'));

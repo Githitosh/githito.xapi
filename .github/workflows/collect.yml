@@ -61,25 +61,46 @@ jobs:
           echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
           mkdir -p public
           if git fetch --depth=1 origin api 2>/dev/null; then git archive FETCH_HEAD | tar -x -C public; fi
-      # The memo (humor.mjs, and the account list ingest.mjs writes) is a PRIVATE repository, never among
-      # the public files. It is read before the requests, so an "account" issue is saved there and news.mjs
-      # can read it in this same run. Names from that list are not printed.
+      # The memo (news-famous.json, humor-accounts.json, and the account list ingest.mjs writes) is a
+      # PRIVATE repository, never among the public files. It is read before the requests, so an "account"
+      # issue is saved there and news.mjs / humor.mjs can read it in this same run. Names are not printed.
       - name: The memo (a private repository)
         continue-on-error: true
         env:
           MEMO_TOKEN: ${{ secrets.MEMO_TOKEN }}
           MEMO_REPO: ${{ vars.MEMO_REPO || format('{0}/githito.memo', github.repository_owner) }}
         run: |
-          if [ -z "$MEMO_TOKEN" ]; then echo "No MEMO_TOKEN secret: the memo is not kept."; exit 0; fi
+          seed_memo() {
+            mkdir -p "$RUNNER_TEMP/memo"
+            if [ -f docs/memo/news-famous.json ]; then cp docs/memo/news-famous.json "$RUNNER_TEMP/memo/news-famous.json"; fi
+            if [ -f docs/memo/humor-accounts.json ]; then cp docs/memo/humor-accounts.json "$RUNNER_TEMP/memo/humor-accounts.json"; fi
+            echo "XAPI_MEMO_DIR=$RUNNER_TEMP/memo" >> "$GITHUB_ENV"
+          }
+          if [ -z "$MEMO_TOKEN" ]; then
+            echo "No MEMO_TOKEN secret: using docs/memo registered-account seeds for this run."
+            seed_memo
+            echo "### 記録（非公開リポジトリ）" >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ MEMO_TOKEN が無いため、docs/memo の登録アカウント一覧で収集します。非公開リポジトリへの書き戻しはしません。" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if git clone -q --depth=1 "https://x-access-token:${MEMO_TOKEN}@github.com/${MEMO_REPO}.git" "$RUNNER_TEMP/memo"; then
             git -C "$RUNNER_TEMP/memo" remote set-url origin "https://github.com/${MEMO_REPO}.git"
             echo "XAPI_MEMO_DIR=$RUNNER_TEMP/memo" >> "$GITHUB_ENV"
+            # First run: copy seed lists from docs/memo when the private memo does not have them yet.
+            if [ ! -f "$RUNNER_TEMP/memo/news-famous.json" ] && [ -f docs/memo/news-famous.json ]; then
+              cp docs/memo/news-famous.json "$RUNNER_TEMP/memo/news-famous.json"
+              echo "Seeded news-famous.json into the private memo."
+            fi
+            if [ ! -f "$RUNNER_TEMP/memo/humor-accounts.json" ] && [ -f docs/memo/humor-accounts.json ]; then
+              cp docs/memo/humor-accounts.json "$RUNNER_TEMP/memo/humor-accounts.json"
+              echo "Seeded humor-accounts.json into the private memo."
+            fi
             echo "The memo is read from the private repository."
           else
-            echo "The private repository could not be read: the memo is not kept in this run."
-            # Said on the run's own page too, so that the owner sees it without reading the log.
+            echo "The private repository could not be read: falling back to docs/memo registered-account seeds."
+            seed_memo
             echo "### 記録（非公開リポジトリ）" >> "$GITHUB_STEP_SUMMARY"
-            echo "⚠️ 非公開リポジトリ ${MEMO_REPO} を読めなかったため、この実行ではアカウントの記録をしていません。Secret の MEMO_TOKEN が無効（作り直したのに貼り替えていない、期限切れ、貼り付けの欠け）か、トークンにこのリポジトリの Contents の読み書き権限がありません。" >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ 非公開リポジトリ ${MEMO_REPO} を読めなかったため、docs/memo の登録アカウント一覧で収集します。Secret の MEMO_TOKEN が無効（作り直したのに貼り替えていない、期限切れ、貼り付けの欠け）か、トークンにこのリポジトリの Contents の読み書き権限がありません。" >> "$GITHUB_STEP_SUMMARY"
           fi
       # Requests the owner sent as issues ("account": the accounts whose replies the News page may play,
       # saved only in the private memo; "talk"): read first, so that this run already collects for them.
@@ -97,11 +118,18 @@ jobs:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node collect.mjs --out public
-      # The Humor page's stories (loving exchanges; greetings in their hours).
+      # Humor: first record ~10 new romantic-reply accounts into humor-accounts.json (humor-find.mjs),
+      # then read only those registered accounts' timelines/conversations (humor.mjs) for stories.
       # The memo was read above. It needs two things set once by the owner: a private repository named
       # githito.memo (or the name in the repository variable MEMO_REPO, "owner/name"), and the secret
       # MEMO_TOKEN, a fine-grained token that may read and write that repository's contents. Without the
       # secret nothing is remembered and an account list is not saved.
+      - name: Humor accounts (about 10 new each run)
+        if: ${{ !inputs.only || inputs.only == 'humor' }}
+        continue-on-error: true
+        env:
+          XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
+        run: node humor-find.mjs
       - name: Humor stories
         if: ${{ !inputs.only || inputs.only == 'humor' }}
         continue-on-error: true
@@ -134,7 +162,7 @@ jobs:
         run: |
           cd public
           # Account lists are private. Never publish them, even if an older run left a file here.
-          if [ -f v1/accounts.json ] || [ -f v1/news-famous.json ] || compgen -G 'v1/humor-memo-*.json' >/dev/null; then rm -f v1/accounts.json v1/news-famous.json v1/humor-memo-*.json; touch .changed; fi
+          if [ -f v1/accounts.json ] || [ -f v1/news-famous.json ] || [ -f v1/humor-accounts.json ] || compgen -G 'v1/humor-memo-*.json' >/dev/null; then rm -f v1/accounts.json v1/news-famous.json v1/humor-accounts.json v1/humor-memo-*.json; touch .changed; fi
           if [ ! -f .changed ]; then echo "Nothing new to publish."; exit 0; fi
           rm -f .changed
           rm -rf .git
@@ -199,7 +227,7 @@ jobs:
         run: |
           cd public
           # Account lists are private. Never publish them, even if an older run left a file here.
-          if [ -f v1/accounts.json ] || [ -f v1/news-famous.json ] || compgen -G 'v1/humor-memo-*.json' >/dev/null; then rm -f v1/accounts.json v1/news-famous.json v1/humor-memo-*.json; touch .changed; fi
+          if [ -f v1/accounts.json ] || [ -f v1/news-famous.json ] || [ -f v1/humor-accounts.json ] || compgen -G 'v1/humor-memo-*.json' >/dev/null; then rm -f v1/accounts.json v1/news-famous.json v1/humor-accounts.json v1/humor-memo-*.json; touch .changed; fi
           if [ ! -f .changed ]; then echo "Nothing new to publish."; exit 0; fi
           rm -f .changed
           rm -rf .git

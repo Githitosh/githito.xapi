@@ -1,37 +1,26 @@
 #!/usr/bin/env node
 /* githito.xapi: the Humor page's stories, made ahead of time.
 
-   The Humor page (githitosh.github.io/news-shorts/humor/) used to search X when Update was pressed:
-   dozens of searches, then one more request for every post a reply answers. That took half a
-   minute to a minute and a half. This program does the same work three times a day and writes the
-   result as one file, v1/humor-<lang>.json, so the page only reads it and plays.
+   The Humor page (githitosh.github.io/news-shorts/humor/) plays loving exchanges. Stories are built
+   here ahead of time into v1/humor-<lang>.json; the page only reads that file.
 
-   What it makes: loving exchanges between two people, a post and the reply to it. Love is the
-   centre; in the morning the page plays greetings first, so greetings said in the morning are
-   collected with their own searches.
+   Only accounts listed in the private memo's humor-accounts.json (--memo or XAPI_MEMO_DIR) are read.
+   New accounts are recorded first by humor-find.mjs (~10 loving-reply accounts each half-hour run);
+   this program then reads those registered accounts only. News accounts (news-famous.json) are a
+   different file; this program does not read them.
 
      node humor.mjs                  build once into ./public (Japanese)
-     node humor.mjs --searches 20    fewer searches (40 unless told); --timelines, --conversations likewise
+     node humor.mjs --timelines 40   how many registered accounts' timelines to read
      node humor.mjs --dry            print the counts, write nothing
      node humor.mjs --no-search      ask nothing: judge the saved stories again and drop the old ones
 
-   It runs every hour. X is read through more than one way in, so that one being refused does not
-   stop a run. A run works in rounds for up to 35 minutes: a way in that refuses is left alone for a
-   few minutes while the others go on (a refusal passes within a quarter of an hour). It stops asking
-   once it has 100 new stories:
-     1. Searches of replies with loving words (FxTwitter), in the hours just past. Greetings are
-        searched in the hours they are said: good mornings from 5 to 10 in Japan, good nights from 21
-        to 2, welcome homes from 17 to 23.
-     2. The latest posts of people already in the file that somebody has answered (FxTwitter's
-        timeline). No search is needed for these.
-     3. Each of these is read as a whole exchange (FxTwitter's conversation: the post, what came
-        before it, the replies under it), and every post-and-reply pair in it that may play is kept:
-        two different people, neither famous, talking plainly (no polite forms, no さん: those are
-        followers and fans, not a couple), words of love or of a greeting (a heart alone is not
-        enough), nothing violent, sexual or heavy, nothing of the body, no talk about works, streams
-        or campaigns. Somebody whose posts or profile speak of school is left out altogether.
-     4. When the conversation is refused, the post a reply answers is read through vxTwitter and its
-        writer through FxTwitter's profile.
+   A run works in rounds for up to the minutes in config: a way in that refuses is left alone while
+   the others go on. It stops asking once it has enough new stories:
+     1. The latest posts of the registered accounts (FxTwitter timeline).
+     2. Each answered post is read as a whole exchange (conversation); every post-and-reply pair that
+        may play and involves a registered account is kept: two different people, neither famous,
+        talking plainly, words of love or of a greeting, nothing violent, sexual or heavy.
+     3. When the conversation is refused, the parent post is read through vxTwitter / FixupX.
    Nobody fills the file: four stories for one person at most, two of them from one run.
    Settings are in config.json under "humor"; "on": false turns it off. Node 20 or newer; no packages. */
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
@@ -40,6 +29,7 @@ import path from 'node:path';
 import { stamp, readJson, charLen, cleanText, readFixupX } from './rules.mjs';
 import { lean, spread, deal } from './pick.mjs';
 import { slander, alcohol, tobacco } from './filters.mjs';
+import { humorAccounts } from './humor-accounts.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -52,65 +42,21 @@ const CONF = {
   on: FILE.on !== false,
   langs: (Array.isArray(FILE.langs) ? FILE.langs : ['ja']).filter(l => l === 'ja' || l === 'en'),
   out: path.resolve(opt('out', path.join(HERE, 'public'))),
-  searches: num('searches', 60), // searches one run may make (about 20 replies each)
-  timelines: num('timelines', 60), // people whose latest posts are read (those in the file and those met in the exchanges)
+  timelines: num('timelines', 60), // registered accounts whose latest posts are read
   conversations: num('conversations', 400), // exchanges read whole (a post, what came before it, the replies under it)
   enough: num('enough', 100),    // a run stops asking once it has this many new stories
   keep: num('keep', 1500),       // stories the file holds
   hours: num('hours', 72),       // a story leaves the file after three days
-  pause: num('pause', 3000),     // milliseconds between two searches
   rest: num('rest', 240000),     // milliseconds a way in is left alone after it refuses (the others go on meanwhile)
   minutes: num('minutes', 13),   // how long one run may last: a refusal passes in a quarter of an hour, so a run waits it out
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1',
-  /* The folder the memo of accounts is kept in (see "the accounts worth coming back to"). It is a private
-     place, never among the public files: the workflow fills it from a private repository. Empty: nothing
-     is remembered. */
+  /* Private memo folder: humor-accounts.json (registration). Empty: no humor account is read. */
   memo: opt('memo', process.env.XAPI_MEMO_DIR || '') ? path.resolve(opt('memo', process.env.XAPI_MEMO_DIR || '')) : '',
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const shuffle = list => list.map(x => [Math.random(), x]).sort((a, b) => a[0] - b[0]).map(x => x[1]);
 
-/* ---------- what is searched ---------- */
-/* Each kind has its searches and the hours of the day (Japan) in which it is said. */
-const SEARCHES = {
-  ja: [
-    /* Greetings said with love are the centre of the page: good morning, good night, welcome home and
-       take care, with a heart, a 好き or a hug in them. Love without a greeting fills the rest. */
-    { kind: 'morning', share: 0.32, hours: [5, 6, 7, 8, 9, 10], q: [
-      '(おはよう OR おはよ OR おはよー) (♡ OR 💕 OR 🥰 OR 😘 OR 好き OR 大好き OR ぎゅ)',
-      '(おはよう OR おはよ) (好き OR 大好き OR 会いたい OR ちゅ OR ぎゅー OR 愛してる)',
-      '(おはおは OR おはよーだよ OR おっはー OR おはよん OR おはよぉ OR おはよーん)',
-      '(おはよ♡ OR おはよう♡ OR おはよ〜♡ OR おはよっ♡ OR おはよー♡)',
-      '(おはよう OR おはよ) (今日も頑張 OR いってらっしゃい OR 気をつけてね OR 起きれた OR 起きた？ OR 寒いね)',
-    ] },
-    { kind: 'night', share: 0.2, hours: [21, 22, 23, 0, 1], q: [
-      '(おやすみ OR おやすみなさい) (♡ OR 💕 OR 🥰 OR 😘 OR 好き OR 大好き OR また明日)',
-      '(おやすみ OR おやすみなさい) (夢で会 OR ぎゅー OR ちゅ OR 愛してる OR 会いたい)',
-      '(おやすみん OR おやすー OR ねんね OR すやぁ OR おやぴ OR おやすみなさいませ)',
-    ] },
-    { kind: 'home', share: 0.16, hours: [12, 13, 17, 18, 19, 20, 21, 22], q: [
-      '(おかえり OR お疲れさま OR おつかれさま) (♡ OR 💕 OR 🥰 OR えらい OR 頑張ったね OR ゆっくりしてね)',
-      '(ただいま OR おかえり) (♡ OR 好き OR ぎゅ OR 会いたかった OR ちゅ)',
-      '(いってらっしゃい OR いってきます) (♡ OR 💕 OR 好き OR ちゅ OR 気をつけて)',
-      '(ただいまー OR おかえりー OR おつかれさま♡ OR おかえりなさい♡ OR がんばったね)',
-    ] },
-    { kind: 'love', share: 0.32, hours: null, q: [
-      '(だいしゅき OR すきすき OR ぎゅーして OR ちゅー OR 会いたいよ OR なでなで OR ♡)',
-      '(彼氏 OR 彼女 OR 旦那 OR 嫁) (すき OR ぎゅー OR だいすき OR ありがと)',
-      '(愛してる OR あいしてる OR 愛してるよ OR 大好きすぎ OR ずっと一緒にいようね OR 一生離さない)',
-      '(いちゃいちゃ OR イチャイチャ OR くっつきたい OR 甘えたい OR ぎゅーってして OR ちゅっ)',
-      '(会いたい OR あいたい OR 寂しい OR さみしい) (♡ OR 💕 OR 🥺 OR 好き OR 大好き)',
-      '(かわいい OR 可愛い OR かっこいい OR カッコいい) (好き OR 大好き OR ♡ OR 💕 OR 🥰)',
-    ] },
-  ],
-  en: [
-    { kind: 'morning', share: 0.34, hours: [5, 6, 7, 8, 9], q: ['("morning sunshine" OR "morning babe" OR "rise and shine" OR "good morning beautiful" OR "good morning handsome")', '("good morning" OR morning) ("love you" OR babe OR ❤ OR 😘 OR 🥰)'] },
-    { kind: 'night', share: 0.12, hours: [21, 22, 23, 0, 1], q: ['("night night" OR "nighty night" OR "sweet dreams" OR "sleep tight")'] },
-    { kind: 'love', share: 0.54, hours: null, q: ['("love you more" OR "miss you more" OR "love ya" OR "my love" OR babe)', '("i love you" OR "love you so much" OR "love you forever" OR cuddle OR snuggle OR "come cuddle")'] },
-  ],
-};
-/* The loving, lovey-dovey kind of talk comes first. */
 const ICHA = {
   ja: /愛してる|あいしてる|いちゃ|イチャ|くっつ[きいこ]|甘え|ぎゅーって|ちゅーして|ちゅっ|一生離さない|ずっと一緒|大好きすぎ/,
   en: /i love you|love you so much|love you forever|cuddle|snuggle|can'?t wait to (?:see|hold) you/i,
@@ -197,13 +143,12 @@ export function talkKind(text) {
 
 /* ---------- asking ---------- */
 /* X is read through more than one way in, so that one of them being refused does not stop a run:
-   - FxTwitter's search finds loving replies;
+   - FxTwitter's timeline gives the latest posts of registered humor accounts;
    - FxTwitter's conversation gives a post together with what came before it and the replies under
-     it, so one request gives the whole exchange (and needs no search for what follows);
-   - FxTwitter's timeline gives the latest posts of people already in the file;
+     it, so one request gives the whole exchange;
    - when the conversation is refused, the post a reply answers is read through vxTwitter and its
-     writer through FxTwitter's profile. */
-let asked = 0;
+     writer through FxTwitter's profile.
+   Finding new accounts to register is humor-find.mjs, not this file. */
 let convAsked = 0;
 let timelineAsked = 0;
 let timelineGave = 0;
@@ -218,11 +163,6 @@ async function fxJson(url) {
   return data;
 }
 /* Replies that match, written in two hours that start at the given time. */
-async function search(q, lang, start) {
-  asked++;
-  const data = await fxJson('https://api.fxtwitter.com/2/search?count=100&q=' + encodeURIComponent(`${q} filter:replies -filter:retweets -filter:links lang:${lang} since_time:${start} until_time:${start + 7200}`));
-  return (data && data.results) || [];
-}
 /* An exchange: the post, the posts before it, and the replies under it. */
 async function conversation(id) {
   convAsked++;
@@ -270,24 +210,6 @@ async function parentOtherWay(handle, id) {
   } catch (e) { return null; }
 }
 const whenOf = st => { const t = st && (st.created_timestamp ? st.created_timestamp * 1000 : Date.parse(st.created_at || '')); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString().replace(/\.\d+Z$/, 'Z') : ''; };
-/* The start of a two-hour window. Loving talk: the hours just past, so that every run finds what is
-   new. A greeting: the hours just past when they are its hours (Japan); otherwise one of its hours
-   today or on one of the two days before. */
-function windowStart(hours) {
-  const now = Math.floor(Date.now() / 1000);
-  if (!hours) return now - 7200 - Math.floor(Math.random() * 7) * 3600;
-  const recent = [2, 3, 4].map(h => now - h * 3600).filter(t => hours.includes(Math.floor(((t + 9 * 3600) % 86400) / 3600)));
-  if (recent.length) return recent[Math.floor(Math.random() * recent.length)];
-  const jstMidnight = Math.floor((now + 9 * 3600) / 86400) * 86400 - 9 * 3600;
-  for (let k = 0; k < 40; k++) {
-    const t = jstMidnight - Math.floor(Math.random() * 3) * 86400 + hours[Math.floor(Math.random() * hours.length)] * 3600;
-    if (t + 7200 <= now && now - t < 60 * 3600) return t;
-  }
-  return now - 7200 - Math.floor(Math.random() * 44) * 3600;
-}
-/* A greeting is searched most in its own hours; outside them it gets a third of its share. */
-const inItsHours = hours => { const h = Math.floor(((Date.now() / 1000 - 2 * 3600 + 9 * 3600) % 86400) / 3600); return !hours || hours.includes(h) || hours.includes((h + 23) % 24); };
-
 /* ---------- pairs ---------- */
 const replyScore = (text, lang) => (charLen(text) <= SHORT[lang] ? 4 : 0) + (CUTE[lang].test(text) ? 5 : 0) + (ICHA[lang].test(text) ? 6 : 0) + (PLAIN[lang].test(text) ? -5 : 0) + Math.random() * 3;
 /* A post and the reply to it, when both may play: two different people, neither famous, the reply a
@@ -391,61 +313,6 @@ function humorPlay(stories) {
   return { made: stamp(), morning: ids(deal(mornings, loving, 0.3, 2, true)), day: ids(deal(loving, homes, 0.3, 2, true)), night: ids(deal(loving, nights, 0.3, 2, true)) };
 }
 
-/* ---------- the accounts worth coming back to ---------- */
-/* Every account whose reply was kept (a story that may play) is remembered, in humor-memo-<lang>.json
-   in the memo folder (--memo or XAPI_MEMO_DIR): a private repository, not the public files. Without
-   that folder nothing is remembered, and a memo left among the public files is taken away. A folder
-   that is the public output, or inside it, is not used. News accounts (news-famous.json) are a
-   different file and are not read or written here.
-   Each run adds every such account: the replies kept this run (their count and best score move
-   forward), then any reply still in the file that is not in the memo yet. A run that finds nothing
-   new still records the accounts already in the file. What is kept is the account's name, when it
-   was first and last noted, how many times, and its best score: nobody's words. The list grows.
-   Nothing is dropped for being old, and there is no maximum. An account that speaks of school (the
-   skip list) is left out.
-   The next runs read a few of them first, ten to sixteen drawn at random, those read longest ago
-   first: people who answer each other lovingly do so again. Names are not printed. */
-const MEMO = { least: 10, span: 7 };
-const drawCount = () => MEMO.least + Math.floor(Math.random() * MEMO.span);   // 10 to 16, how many are read first
-const HANDLE = /^[A-Za-z0-9_]{1,15}$/;
-function memoFrom(file) {
-  const memo = {};
-  Object.values((file && file.accounts && typeof file.accounts === 'object') ? file.accounts : {}).forEach(m => {
-    if (!m || !HANDLE.test(String(m.h || '')) || skipped(m.h)) return;
-    memo[String(m.h).toLowerCase()] = { h: String(m.h), first: m.first || m.last, last: m.last, n: Number(m.n) || 1, best: Number(m.best) || 0 };
-  });
-  return memo;
-}
-/* Adds every reply account in `fresh` (this run: the count moves forward) and then any in `kept`
-   that is not remembered yet. Returns the names added or moved forward. Best score in that list wins. */
-function rememberAccounts(memo, fresh, kept) {
-  const noted = [];
-  const take = (list, bump) => {
-    const best = new Map();
-    list.forEach(s => {
-      const h = String((s && s.b && s.b.handle) || '');
-      if (!HANDLE.test(h) || skipped(h)) return;
-      const k = h.toLowerCase();
-      const score = Number(s.score) || 0;
-      const cur = best.get(k);
-      if (!cur || score > cur.score) best.set(k, { h, score });
-    });
-    best.forEach(({ h, score }, k) => {
-      const prev = memo[k];
-      if (!prev) {
-        memo[k] = { h, first: stamp(), last: stamp(), n: 1, best: score };
-        noted.push(k);
-      } else if (bump) {
-        memo[k] = { h, first: prev.first || stamp(), last: stamp(), n: (Number(prev.n) || 0) + 1, best: Math.max(Number(prev.best) || 0, score) };
-        noted.push(k);
-      }
-    });
-  };
-  take(fresh, true);
-  take(kept, false);
-  return noted;
-}
-
 /* ---------- one language ---------- */
 async function build(lang) {
   const file = path.join(CONF.out, 'v1', `humor-${lang}.json`);
@@ -453,57 +320,45 @@ async function build(lang) {
   const old = (Array.isArray(before.stories) ? before.stories : []).filter(s => s && s.id && s.a && s.b && s.a.text && s.b.text);
   const have = new Set(old.flatMap(s => [s.id, s.a.id, ...(Array.isArray(s.t) ? s.t.map(m => m.i) : [])]));
   const texts = new Set(old.flatMap(s => [squash(s.a.text).slice(0, 50), squash(s.b.text).slice(0, 50)]));
-  /* What has been read as an exchange in the last two days is not read again. */
   const conv = {};
   Object.entries((before.conv && typeof before.conv === 'object') ? before.conv : {}).forEach(([id, at]) => { if (Date.now() - Date.parse(at || 0) < CONF.hours * 3600e3) conv[id] = at; });
-  const count = { searches: 0, replies: 0, candidates: 0, timelines: 0, posts: 0, conversations: 0, otherWay: 0, stories: 0 };
-  /* People left out in the last two weeks stay out. */
+  const count = { timelines: 0, posts: 0, conversations: 0, otherWay: 0, stories: 0 };
   Object.entries((before.skip && typeof before.skip === 'object') ? before.skip : {}).forEach(([h, at]) => { if (Date.now() - Date.parse(at || 0) < 14 * 24 * 3600e3) SKIP.set(h, at); });
-  /* Nobody fills the file: four stories for one person at most, two of them from one run. */
   const perPerson = new Map();
   const perRun = new Map();
   old.forEach(s => [s.a.handle, s.b.handle].forEach(h => { const k = String(h).toLowerCase(); perPerson.set(k, (perPerson.get(k) || 0) + 1); }));
   const off = CONF.noSearch;
 
-  /* The searches this run would make: each kind by its share, in the hours just past. */
-  const plan = [];
-  (SEARCHES[lang] || []).forEach(k => {
-    const n = Math.max(1, Math.round(CONF.searches * k.share * (inItsHours(k.hours) ? 1 : 1 / 3)));
-    for (let i = 0; i < n; i++) plan.push({ kind: k.kind, q: k.q[i % k.q.length], start: windowStart(k.hours) });
-  });
-  const searches = shuffle(plan).slice(0, CONF.searches);
-  /* People whose latest posts are read (those that somebody has answered need no search): both sides
-     of the stories in the file, and whoever is met in the exchanges read in this run. Those never read
-     come first, then those read longest ago, so every run asks different people. */
+  const ACC = await humorAccounts(CONF.memo);
+  const allow = ACC.handles;
+  const registered = (ACC[lang] || []).map(e => e.h).filter(h => !skipped(h));
+  if (ACC.missing) console.log(`  ${lang}: no humor-accounts.json: no humor account is read`);
+  else console.log(`  ${lang}: ${registered.length} humor accounts from the private memo`);
+  if (!CONF.memo) console.log(`  ${lang}: no private folder for the memo (--memo)`);
+  if (!CONF.dry) await rm(path.join(CONF.out, 'v1', `humor-memo-${lang}.json`), { force: true });
+
   const readAt = {};
   Object.entries((before.people && typeof before.people === 'object') ? before.people : {}).forEach(([h, at]) => { if (Date.now() - Date.parse(at || 0) < 7 * 24 * 3600e3) readAt[h] = at; });
   const known = new Set();
   const people = [];
-  const meet = handle => { const h = String(handle || ''); const k = h.toLowerCase(); if (!h || known.has(k) || skipped(h)) return; known.add(k); people.push(h); };
-  /* The accounts in the memo come first (see above): a number drawn at random, those read longest ago first. */
-  const memoDir = CONF.memo ? path.resolve(CONF.memo) : '';
-  const outDir = path.resolve(CONF.out);
-  const memoPublic = memoDir && (memoDir === outDir || memoDir.startsWith(outDir + path.sep));
-  const memoFile = memoDir && !memoPublic ? path.join(memoDir, `humor-memo-${lang}.json`) : '';
-  const memoRaw = memoFile ? await readJson(memoFile, {}) : {};
-  const memoRawCount = memoRaw && memoRaw.accounts && typeof memoRaw.accounts === 'object' ? Object.keys(memoRaw.accounts).length : 0;
-  const memo = memoFile ? memoFrom(memoRaw) : {};
-  /* The memo is not public: one that was written among the public files is taken away. */
-  if (!CONF.dry) await rm(path.join(CONF.out, 'v1', `humor-memo-${lang}.json`), { force: true });
-  if (!memoDir) console.log(`  ${lang}: no private folder for the memo (--memo): no account is remembered`);
-  else if (memoPublic) console.log(`  ${lang}: the memo folder is among the public files, so no account is remembered`);
-  const memoFirst = shuffle(Object.values(memo)).sort((x, y) => (Date.parse(readAt[x.h.toLowerCase()] || 0) || 0) - (Date.parse(readAt[y.h.toLowerCase()] || 0) || 0)).slice(0, drawCount()).map(m => m.h);
-  memoFirst.forEach(meet);
-  if (memoFirst.length) console.log(`  ${lang}: ${Object.keys(memo).length} accounts in the memo; ${memoFirst.length} of them are read first`);
-  shuffle(old.flatMap(s => [s.a.handle, s.b.handle])).sort((x, y) => (Date.parse(readAt[x.toLowerCase()] || 0) || 0) - (Date.parse(readAt[y.toLowerCase()] || 0) || 0)).forEach(meet);
-  const cands = [];   // loving replies found by search, to be read as exchanges
-  const posts = [];   // answered posts from the timelines, to be read as exchanges
+  const meet = handle => {
+    const h = String(handle || '');
+    const k = h.toLowerCase();
+    if (!h || known.has(k) || skipped(h) || !allow.has(k)) return;
+    known.add(k);
+    people.push(h);
+  };
+  shuffle(registered).sort((x, y) => (Date.parse(readAt[x.toLowerCase()] || 0) || 0) - (Date.parse(readAt[y.toLowerCase()] || 0) || 0)).forEach(meet);
+  if (people.length) console.log(`  ${lang}: ${people.length} registered accounts queued for timelines`);
+
+  const posts = [];
   const seen = new Set();
   const found = [];
   const keep = pair => {
     const ak = squash(pair.a.text).slice(0, 50), bk = squash(pair.b.text).slice(0, 50);
     if (have.has(pair.id) || texts.has(ak) || texts.has(bk)) { why('already in the file'); return false; }
     const who = [pair.a.handle, pair.b.handle].map(h => String(h).toLowerCase());
+    if (!who.some(h => allow.has(h))) { why('not a registered account'); return false; }
     if (who.some(h => skipped(h) || (perPerson.get(h) || 0) >= 4 || (perRun.get(h) || 0) >= 2)) { why('that person has enough stories'); return false; }
     who.forEach(h => { perPerson.set(h, (perPerson.get(h) || 0) + 1); perRun.set(h, (perRun.get(h) || 0) + 1); });
     have.add(pair.id);
@@ -513,52 +368,16 @@ async function build(lang) {
     return true;
   };
 
-  /* One run is a number of rounds: a few searches, a few timelines, then the exchanges waiting to be
-     read. A way in that refuses is left alone for some minutes while the others go on; a refusal
-     passes within a quarter of an hour, so the run waits it out instead of giving up. The run ends
-     when it has enough new stories, when nothing is left to ask, or when its time is up. */
   const deadline = Date.now() + CONF.minutes * 60e3;
-  const restUntil = { search: 0, timeline: 0, conversation: 0 };
-  const refusedTimes = { search: 0, timeline: 0, conversation: 0 };
+  const restUntil = { timeline: 0, conversation: 0 };
+  const refusedTimes = { timeline: 0, conversation: 0 };
   const open = way => Date.now() >= restUntil[way];
   const refuse = (way, e) => { refusedTimes[way]++; restUntil[way] = Date.now() + CONF.rest; console.log(`  ${way} ${e ? e.message : 'refused'}: left alone for ${Math.round(CONF.rest / 60000)} minutes`); };
-  let si = 0;
   let pi = 0;
-  let ci = 0;
-  let qi = 0;
   let readThisRun = 0;
-  while (!off && Date.now() < deadline && found.length < CONF.enough) {
+  const canAsk = !off && !ACC.missing && allow.size > 0;
+  while (canAsk && Date.now() < deadline && found.length < CONF.enough) {
     let did = 0;
-    /* A. Searches of loving replies. */
-    for (let k = 0; k < 6 && si < searches.length && open('search'); k++) {
-      const p = searches[si];
-      let list;
-      try { list = await search(p.q, lang, p.start); }
-      catch (e) { if (!(e instanceof Refused)) throw e; refuse('search', e); break; }
-      si++;
-      did++;
-      count.searches++;
-      count.replies += list.length;
-      let got = 0;
-      list.forEach(st => {
-        const handle = handleOf(st);
-        const text = romanceText(st, lang);
-        const parent = parentOf(st);
-        const id = statusId(st);
-        if (!handle || !text || !id || !parent.id || !LOVE[lang].test(text) || charLen(text) > LONG[lang]) return;
-        if (followers(st) > 20000 || parent.who.toLowerCase() === handle.toLowerCase() || skipped(handle)) return;
-        const tk = squash(text).slice(0, 50);
-        if (seen.has(id) || seen.has(tk) || have.has(id) || have.has(parent.id) || conv[id]) return;
-        seen.add(id);
-        seen.add(tk);
-        cands.push({ want: p.kind, id, st, parent, score: replyScore(text, lang) });
-        got++;
-      });
-      count.candidates += got;
-      console.log(`  ${lang} ${p.kind} "${p.q.slice(0, 28)}…": ${list.length} replies, ${got} may play`);
-      await sleep(CONF.pause);
-    }
-    /* B. Timelines. */
     for (let k = 0; k < 5 && pi < people.length && count.timelines < CONF.timelines && open('timeline'); k++) {
       const handle = people[pi];
       let list;
@@ -581,22 +400,17 @@ async function build(lang) {
       });
       await sleep(1200);
     }
-    /* C. The exchanges waiting to be read: the best replies and the most answered posts in turn. Two
-       pairs at most from one exchange. (Reading the file's own exchanges again gave the same pairs.) */
-    cands.sort((x, y) => (x.done ? 1 : 0) - (y.done ? 1 : 0) || y.score - x.score);
     posts.sort((x, y) => (x.done ? 1 : 0) - (y.done ? 1 : 0) || y.replies - x.replies);
     const next = () => {
-      const c = cands.find(x => !x.done), p = posts.find(x => !x.done);
-      const pick = qi++ % 2 === 0 ? (c || p) : (p || c);
-      if (pick) pick.done = true;
-      return pick;
+      const p = posts.find(x => !x.done);
+      if (p) p.done = true;
+      return p;
     };
     for (let k = 0; k < 12 && open('conversation') && readThisRun < CONF.conversations && found.length < CONF.enough; k++) {
       const batch = [next(), next(), next(), next()].filter(Boolean);
       if (!batch.length) break;
       const got = await Promise.all(batch.map(x => conversation(x.id).catch(e => { if (e instanceof Refused) return null; throw e; })));
       if (got.every(g => !g)) {
-        /* Refused: the post each reply answers is read another way, and the exchanges wait their turn again. */
         const others = await Promise.all(batch.map(x => (x.st && x.parent ? parentOtherWay(x.parent.who, x.parent.id) : null)));
         others.forEach((pst, n) => {
           if (!pst) { batch[n].done = false; return; }
@@ -616,7 +430,7 @@ async function build(lang) {
         count.conversations++;
         via.conversation++;
         conv[batch[n].id] = stamp();
-        list.forEach(st => { if (followers(st) <= 20000) meet(handleOf(st)); });
+        list.forEach(st => meet(handleOf(st)));
         let pairs = 0;
         const taken = new Set();
         pairsIn(list, lang).forEach(pair => {
@@ -627,11 +441,10 @@ async function build(lang) {
       });
       await sleep(1500);
     }
-    const waiting = cands.some(x => !x.done) || posts.some(x => !x.done);
-    const more = si < searches.length || (pi < people.length && count.timelines < CONF.timelines) || waiting;
+    const waiting = posts.some(x => !x.done);
+    const more = (pi < people.length && count.timelines < CONF.timelines) || waiting;
     if (!more) break;
-    console.log(`  ${lang} round: ${count.searches} searches, ${count.timelines} timelines, ${count.conversations} exchanges read, ${found.length} new stories`);
-    /* Nothing could be asked this round: wait for the way in that opens first. */
+    console.log(`  ${lang} round: ${count.timelines} timelines, ${count.conversations} exchanges read, ${found.length} new stories`);
     if (!did) await sleep(Math.max(15000, Math.min(60000, Math.min(...Object.values(restUntil).filter(t => t > Date.now()).concat(Date.now() + 60000)) - Date.now())));
   }
   if (found.length >= CONF.enough) console.log(`  ${lang}: ${found.length} new stories, which is enough for one run`);
@@ -639,11 +452,12 @@ async function build(lang) {
   count.refused = refusedTimes;
   console.log('  pairs not kept: ' + JSON.stringify(WHY));
 
-  /* The file: this run's stories and the earlier ones that are still young and still may play. */
   const fresh = s => Date.now() - Date.parse(s.found || 0) < CONF.hours * 3600e3;
   const pairText = s => s.a.text + ' ' + s.b.text;
   const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && !slander(pairText(s)) && !alcohol(pairText(s)) && !tobacco(pairText(s)) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !AGE.test(s.a.text) && !AGE.test(s.b.text) && !EMOJI_HINT.test(pairText(s))
     && !FAN.test(pairText(s)) && !BODY.test(pairText(s)) && !FAMILY.test(pairText(s)) && (lang === 'en' || (!POLITE.test(s.a.text) && !POLITE.test(s.b.text)));
+  /* Both speakers must be on humor-accounts.json: videos show only registered accounts' words. */
+  const registeredStory = s => allow.has(String(s.a.handle).toLowerCase()) && allow.has(String(s.b.handle).toLowerCase());
   const fine = x => cleanText(x) && !slander(x) && !alcohol(x) && !tobacco(x) && !UNSAFE_ROMANCE.test(x) && !YOUTH.test(x) && !AGE.test(x) && !EMOJI_HINT.test(x) && !FAN.test(x) && !BODY.test(x) && !FAMILY.test(x) && (lang === 'en' || !POLITE.test(x));
   const talk = s => {
     if (!Array.isArray(s.t)) return s;
@@ -655,42 +469,27 @@ async function build(lang) {
     const { t: _, ...rest } = s;
     return t.length > 2 ? { ...rest, t } : rest;
   };
-  const stories = found.filter(s => !skipped(s.a.handle) && !skipped(s.b.handle)).concat(old.filter(s => fresh(s) && ok(s) && !skipped(s.a.handle) && !skipped(s.b.handle)).map(s => ({ ...s, kind: talkKind(pairText(s)) }))).map(talk).slice(0, CONF.keep);
-  /* The memo: every reply that was kept is remembered, this run's first (the count moves forward), then
-     any still in the file that is not there yet. A run that found nothing new still records the file.
-     Names are written only in the private file. */
-  if (memoFile) {
-    const kept = new Set(stories.map(s => s.id));
-    const fresh0 = found.filter(s => kept.has(s.id));
-    const noted = rememberAccounts(memo, fresh0, stories);
-    count.memo = noted.length;
-    count.memoTotal = Object.keys(memo).length;
-    console.log(`  ${lang}: accounts noted for their replies: ${noted.length}; the memo holds ${count.memoTotal}`);
-    const changed = noted.length > 0 || count.memoTotal !== memoRawCount;
-    if (!CONF.dry && changed) {
-      await mkdir(path.dirname(memoFile), { recursive: true });
-      const accounts = Object.fromEntries(Object.values(memo).sort((x, y) => (y.best - x.best) || (Date.parse(y.last) - Date.parse(x.last))).map(m => [m.h.toLowerCase(), m]));
-      await writeFile(memoFile, JSON.stringify({ version: 1, lang, updated: stamp(), noted, accounts }, null, 1) + '\n');
-    }
-  }
+  const keepOld = ACC.missing ? () => false : s => fresh(s) && ok(s) && registeredStory(s) && !skipped(s.a.handle) && !skipped(s.b.handle);
+  const stories = found.filter(s => !skipped(s.a.handle) && !skipped(s.b.handle) && registeredStory(s))
+    .concat(old.filter(keepOld).map(s => ({ ...s, kind: talkKind(pairText(s)) }))).map(talk).slice(0, CONF.keep);
   const kinds = {};
   stories.forEach(s => { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
-  console.log(`  ${lang}: ${count.searches} searches gave ${count.replies} replies, ${count.candidates} of them may play; ${count.timelines} timelines gave ${count.posts} answered posts; ${count.conversations} exchanges read whole (${count.otherWay} posts another way); ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)}.`);
+  console.log(`  ${lang}: ${count.timelines} timelines gave ${count.posts} answered posts; ${count.conversations} exchanges read whole (${count.otherWay} posts another way); ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)}.`);
   return { version: 3, lang, updated: stamp(), run: off ? (before.run || null) : { at: stamp(), ...count }, kinds, conv, people: readAt, skip: Object.fromEntries(SKIP), play: humorPlay(stories), stories };
 }
 
 async function main() {
   if (!CONF.on) { console.log('Humor stories are turned off (config.json, "humor": { "on": false }).'); return; }
   for (const lang of CONF.langs.length ? CONF.langs : ['ja']) {
-    console.log(`Humor stories, ${lang}: loving exchanges, greetings in their hours`);
+    console.log(`Humor stories, ${lang}: loving exchanges from humor-accounts.json only`);
     const out = await build(lang);
     if (CONF.dry) continue;
     await mkdir(path.join(CONF.out, 'v1'), { recursive: true });
     await writeFile(path.join(CONF.out, 'v1', `humor-${lang}.json`), JSON.stringify(out) + '\n');
     await writeFile(path.join(CONF.out, '.changed'), stamp() + '\n');
   }
-  console.log(`Asked api.fxtwitter.com for ${asked} searches, ${timelineAsked} timelines (${timelineGave} answered) and ${convAsked} conversations; posts read another way: vxTwitter ${via.vxtwitter}, FixupX ${via.fixupx}.`);
+  console.log(`Asked api.fxtwitter.com for ${timelineAsked} timelines (${timelineGave} answered) and ${convAsked} conversations; posts read another way: vxTwitter ${via.vxtwitter}, FixupX ${via.fixupx}.`);
 }
 /* (For checking the talks against exchanges read by hand.) */
-export { pairsIn, rememberAccounts };
+export { pairsIn };
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(e => { console.error(e.message || e); process.exit(1); });

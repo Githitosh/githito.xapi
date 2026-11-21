@@ -18,6 +18,7 @@
 
      node people.mjs --out public [--minutes 4] [--memo <folder>] */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { cruel, personal, slander, alcohol, tobacco, politicalAttack, advert } from './filters.mjs';
 import { newsAccounts } from './news-accounts.mjs';
@@ -26,7 +27,7 @@ const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 const CONF = {
   out: path.resolve(opt('out', 'public')),
-  minutes: Number(opt('minutes', 4)) || 4,
+  minutes: Number(opt('minutes', 6)) || 6,
   hours: 72,
   keep: 1000,
 };
@@ -76,7 +77,10 @@ async function famous(lang, people, have, readAt, notThem, minutes) {
       const likes = Number(st.likes) || 0;
       const at = st.created_at ? new Date(st.created_at).toISOString().replace(/\.\d+Z$/, 'Z') : '';
       if (likes < least || Date.now() - Date.parse(at || 0) > 72 * 3600e3 || have.has(String(st.id)) || st.possibly_sensitive) return null;
-      if (lang === 'en' ? (t.length < 20 || t.length > 200 || /[ぁ-ヿ一-鿿]/.test(t)) : (len(t) < 8 || len(t) > 100 || (t.match(/[ぁ-ヿ一-鿿]/g) || []).length < 4)) return null;
+      /* English: Latin text only (no CJK / Devanagari stand-ins from mixed posts). Japanese: enough kana/kanji. */
+      if (lang === 'en'
+        ? (t.length < 20 || t.length > 200 || /[ぁ-ヿ一-鿿\u0900-\u097F]/.test(t) || (t.match(/[A-Za-z]/g) || []).length < 12)
+        : (len(t) < 8 || len(t) > 100 || (t.match(/[ぁ-ヿ一-鿿]/g) || []).length < 4)) return null;
       if (!famousOk(t)) return null;
       return { id: String(st.id), h: a.screen_name, n: String(a.name).slice(0, 40), f: Number(a.followers) || 0, l: likes, t, on: '', own: 1, g, at, found: stamp() };
     }).filter(Boolean).sort((x, y) => y.l - x.l).slice(0, 2);
@@ -136,4 +140,4 @@ async function main() {
   await gather('en', state.en, CONF.minutes);
   await saveState(state);
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === new URL(import.meta.url).pathname) main().catch(e => { console.error(e.message || e); process.exit(1); });
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(e => { console.error(e.message || e); process.exit(1); });

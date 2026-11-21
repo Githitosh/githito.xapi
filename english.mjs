@@ -8,6 +8,7 @@
 
      node english.mjs --out public [--memo <folder>] */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { cruel, personal, adultNews } from './filters.mjs';
 import { newsAccounts } from './news-accounts.mjs';
@@ -44,4 +45,4 @@ async function main() {
     ? 'English news: no news-famous.json, so no news account is kept.'
     : `English news: ${heads.length} headlines from the private memo kept; ${dropped} from other accounts dropped.`);
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === new URL(import.meta.url).pathname) main().catch(e => { console.error(e.message || e); process.exit(1); });
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(e => { console.error(e.message || e); process.exit(1); });

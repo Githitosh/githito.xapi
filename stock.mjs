@@ -10,10 +10,11 @@
                              (a talk is a conversation; a message is a card)
      both: videos [{ i, at, c: [card or talk ids], m? }], replies (to the accounts readers asked for), asked
 
-   News cards are the private memo's accounts only (news-famous.json, read by people.mjs). When that
-   file is read, a card whose account is not in it is dropped and is not refilled. When the file is
-   missing, the news stock is left as it is (no built-in list is used in its place). Humor is not
-   touched. Memo cards, and the videos made of them, keep accumulating.
+   News cards are the private memo's accounts' own posts only (news-famous.json → people.mjs). A card
+   that is not their own post, or whose account is not in that file, is dropped and is not refilled.
+   Humor talks are humor-accounts.json only: a talk with nobody on that list is dropped. When either
+   list is missing or empty, that stock is cleared (empty cards/talks and videos): pages must not keep
+   showing unregistered content.
 
    The pages read these files and nothing else: they make no words of their own. A reader's page plays the
    newest video it has not played, or picks among the cards when the reader chose genres or words.
@@ -22,8 +23,9 @@
    --videos N keeps only the N newest videos. Without it, nothing is cut: the stock grows. */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { newsCard, talkCards, replyCard, personCard, personCardEn } from './compose.mjs';
+import { talkCards, replyCard, personCard, personCardEn } from './compose.mjs';
 import { newsAccounts } from './news-accounts.mjs';
+import { humorAccounts } from './humor-accounts.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -142,126 +144,140 @@ async function main() {
   const principles = ['A place to enjoy replies and to watch the news lightly.', 'No fear of being swayed by advertising: no ads, promotions or calls to buy.', 'Not a place for slander: nothing that hurts or runs people down, no attacks on politicians, parties, the government or the media.', 'Nothing that upsets anyone: no cruel news, nothing about one person\'s honour or private life, no alcohol or smoking.', 'Even-handed. When in doubt, a thing is left out.'];
   const asked = Array.isArray(news.asked) ? news.asked : [];
   const memo = await newsAccounts(opt('memo', process.env.XAPI_MEMO_DIR || ''));
-  /* No built-in list. A missing file allows nobody new; the stock already on disk is left for the
-     next run that can read the file, which drops every card that is not in it. */
-  const allow = c => !!c && memo.handles.has(String(c.h || '').replace(/^@+/, '').toLowerCase());
+  /* News videos: registered accounts' own posts only (news-famous.json + people.mjs).
+     Replies, keyword search, and other people's posts never become news cards or videos. */
+  const registered = c => !!c && !!c.own && memo.handles.has(String(c.h || '').replace(/^@+/, '').toLowerCase());
+  const allowJa = c => registered(c) && ((String((c.ja || []).join('')).match(/[ぁ-ヿ一-鿿]/g) || []).length >= 4);
+  const allowEn = c => {
+    const t = String((c.ja || []).join(''));
+    return registered(c) && (t.match(/[A-Za-z]/g) || []).length >= 12 && !/[ぁ-ヿ一-鿿\u0900-\u097F]/.test(t);
+  };
+  const newsReady = !memo.missing && memo.handles.size > 0;
   let changed = false;
 
-  /* The replies to the accounts readers asked for: a card each, the newest first. */
+  /* Replies to accounts a reader asked for (Settings): kept for that reader only, not dealt into news videos. */
   const posts = news.news && typeof news.news === 'object' ? news.news : {};
   const replies = (Array.isArray(news.items) ? news.items : []).map(x => replyCard(x, posts[x.n])).filter(Boolean)
     .sort((x, y) => time(y) - time(x)).slice(0, 200);
 
-  /* News: the headlines, the newest first. A card from an account one reader asked for (q) is not dealt
-     into the videos: it plays only for that reader. */
-  const heads = Array.isArray(news.heads) ? news.heads : [];
-  const cards = [];
-  const seen = new Set();
-  for (const x of heads) {
-    const c = newsCard(x);
-    if (!c || seen.has(c.id) || seen.has(c.ja.join('|'))) continue;
-    seen.add(c.id); seen.add(c.ja.join('|'));
-    cards.push(c);
-  }
-  cards.sort((x, y) => time(y) - time(x));
-  /* News: the memo accounts' own posts (people.mjs). Videos of ten, nobody twice, a genre at most four
-     times. A card already in the stock stays when its account is still in the memo; any other news card
-     is dropped and is not refilled. */
+  /* News videos: people.mjs posts from the memo only. Older headline/reply cards are dropped. */
   const pplFile = await readJson(path.join(OUT, 'v1', 'people-ja.json'), {});
-  const headById = new Map(heads.map(x => [String(x.id), x]));
-  const freshSaid = (Array.isArray(pplFile.people) ? pplFile.people : []).map(p => personCard(p, headById.get(String(p.on)))).filter(Boolean);
-  if (memo.missing) console.log('News: news-famous.json is missing, so no news account is collected and the news stock is left as it is.');
-  else {
-    const { said, added, carried } = peopleCards(freshSaid, oldNews.cards, allow);
-    const askedCards = mergeStock((Array.isArray(oldNews.cards) ? oldNews.cards : []).filter(c => c && c.q && cardKeep(c) && allow(c)), cards.filter(c => c.q && allow(c)), c => c.id).items;
-    const dropped = (Array.isArray(oldNews.cards) ? oldNews.cards : []).filter(c => cardKeep(c) && !allow(c)).length;
-    const d = deal(said, oldNews.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 3 });
-    const file = { version: 2, lang: 'ja', made, principles, size: SIZE, cards: said.concat(askedCards), videos: d.videos, replies, asked };
+  const freshSaid = (Array.isArray(pplFile.people) ? pplFile.people : [])
+    .filter(p => p && p.own && memo.handles.has(String(p.h || '').replace(/^@+/, '').toLowerCase()))
+    .map(p => personCard(p, null)).filter(Boolean);
+  if (!newsReady) {
+    const file = { version: 2, lang: 'ja', made, principles, size: SIZE, cards: [], videos: [], replies, asked };
+    if (await save('stock-news-ja.json', file)) changed = true;
+    console.log('News: news-famous.json is missing or empty, so the news stock was cleared (unregistered cards must not stay).');
+  } else {
+    const { said, added, carried } = peopleCards(freshSaid, oldNews.cards, allowJa);
+    const dropped = (Array.isArray(oldNews.cards) ? oldNews.cards : []).filter(c => cardKeep(c) && !allowJa(c)).length;
+    /* version 4: drop videos built from the old non-registered / non-own generator. */
+    const d = deal(said, oldNews.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 4 });
+    const file = { version: 2, lang: 'ja', made, principles, size: SIZE, cards: said, videos: d.videos, replies, asked };
     if (await save('stock-news-ja.json', file)) changed = true;
     const cuts = {}; said.forEach(c => { cuts[c.cut] = (cuts[c.cut] || 0) + 1; });
-    console.log(`News: ${said.length} cards from the memo accounts (${added} added this run, ${carried} already in the stock) ${JSON.stringify(cuts)}; ${dropped} cards from other accounts dropped; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept), ${d.waiting} cards wait for the next video; ${replies.length} replies to asked accounts.`);
+    console.log(`News: ${said.length} cards from registered accounts (${added} added this run, ${carried} already in the stock) ${JSON.stringify(cuts)}; ${dropped} unregistered/non-own cards dropped; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept), ${d.waiting} cards wait for the next video; ${replies.length} replies to asked accounts.`);
   }
 
-  /* News in English: the memo's English accounts (people-en.json), in English as written.
-     The same rule: memo cards accumulate, and every other news card is dropped. */
-  const newsEn = await readJson(path.join(OUT, 'v1', 'news-en.json'), {});
+  /* News in English: the memo's English accounts (people-en.json), own posts only. */
   const oldEn = await readJson(path.join(OUT, 'v1', 'stock-news-en.json'), {});
   const pplEn = await readJson(path.join(OUT, 'v1', 'people-en.json'), {});
-  const headEn = new Map((Array.isArray(newsEn.heads) ? newsEn.heads : []).map(x => [String(x.id), x]));
-  const freshEn = (Array.isArray(pplEn.people) ? pplEn.people : []).map(p => personCardEn(p, headEn.get(String(p.on)))).filter(Boolean);
-  if (memo.missing) console.log('News in English: news-famous.json is missing, so the English news stock is left as it is.');
-  else {
-    const en = peopleCards(freshEn, oldEn.cards, allow);
-    const droppedEn = (Array.isArray(oldEn.cards) ? oldEn.cards : []).filter(c => cardKeep(c) && !allow(c)).length;
-    const enDeal = deal(en.said, oldEn.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 3 });
+  const freshEn = (Array.isArray(pplEn.people) ? pplEn.people : [])
+    .filter(p => p && p.own && memo.handles.has(String(p.h || '').replace(/^@+/, '').toLowerCase()))
+    .map(p => personCardEn(p, null)).filter(Boolean);
+  if (!newsReady) {
+    const enFile = { version: 2, lang: 'en', made, principles, size: SIZE, cards: [], videos: [] };
+    if (await save('stock-news-en.json', enFile)) changed = true;
+    console.log('News in English: news-famous.json is missing or empty, so the English news stock was cleared.');
+  } else {
+    const en = peopleCards(freshEn, oldEn.cards, allowEn);
+    const droppedEn = (Array.isArray(oldEn.cards) ? oldEn.cards : []).filter(c => cardKeep(c) && !allowEn(c)).length;
+    const enDeal = deal(en.said, oldEn.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 4 });
     const enFile = { version: 2, lang: 'en', made, principles, size: SIZE, cards: en.said, videos: enDeal.videos };
     if (await save('stock-news-en.json', enFile)) changed = true;
-    console.log(`News in English: ${en.said.length} cards from the memo accounts (${en.added} added this run, ${en.carried} already in the stock); ${droppedEn} cards from other accounts dropped; videos: ${enDeal.videos.length} (${enDeal.made} new, ${enDeal.kept} kept).`);
+    console.log(`News in English: ${en.said.length} cards from registered accounts (${en.added} added this run, ${en.carried} already in the stock); ${droppedEn} unregistered/non-own cards dropped; videos: ${enDeal.videos.length} (${enDeal.made} new, ${enDeal.kept} kept).`);
   }
 
-  /* Reply News: a video is conversations, whole, about ten messages: greetings said with love first, then
-     the longest talks; nobody in two talks of one video; in each video the talks follow the day (good
-     morning, take care and welcome home, loving talk, good night). A video of mostly morning greetings is
-     marked m (the page plays those in the morning). */
+  /* Reply News / Humor: a video is conversations, whole, about ten messages: greetings said with love first,
+     then the longest talks; nobody in two talks of one video; in each video the talks follow the day.
+     Only talks that involve a registered humor account (humor-accounts.json) are kept. */
+  const humorMemo = await humorAccounts(opt('memo', process.env.XAPI_MEMO_DIR || ''));
+  const humorReady = !humorMemo.missing && humorMemo.handles.size > 0;
+  /* Every message author in a kept talk must be on the humor list (both sides of the exchange). */
+  const humorAllow = t => !!t && Array.isArray(t.m) && t.m.length >= 2
+    && t.m.every(x => x && x.h && humorMemo.handles.has(String(x.h).replace(/^@+/, '').toLowerCase()));
   const stories = Array.isArray(humor.stories) ? humor.stories : [];
   const seenMsg = new Set();
-  const freshTalks = stories.map(talkCards).filter(t => t && talkKeep(t) && !t.m.some(x => x.i && seenMsg.has(x.i)) && (t.m.forEach(x => x.i && seenMsg.add(x.i)), true));
-  const carriedTalks = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).filter(talkKeep);
-  /* A talk already in a video claims its messages first, so that video is not broken by a new copy of the same lines. */
-  const freshIds = new Set(freshTalks.map(t => String(t.i)));
-  const carriedIds = new Set(carriedTalks.map(t => String(t.i)));
-  const inVideo = new Set((Array.isArray(oldHumor.videos) ? oldHumor.videos : []).flatMap(v => (v && v.c || []).map(String)));
-  const mergedTalks = mergeStock(carriedTalks, freshTalks, t => t.i);
-  const talkSeen = new Set();
-  const talks = [];
-  const claimOrder = mergedTalks.items.slice().sort((a, b) => (inVideo.has(String(a.i)) ? 0 : 1) - (inVideo.has(String(b.i)) ? 0 : 1));
-  for (const t of claimOrder) {
-    if (t.m.some(x => x.i && talkSeen.has(String(x.i)))) continue;
-    t.m.forEach(x => x.i && talkSeen.add(String(x.i)));
-    talks.push(t);
-  }
-  if (talks.length) {
-    const rank = t => t.gl * 100 + Math.min(t.m.length, 8) * 6 + (Number(t.s) || 0);
-    talks.sort((x, y) => (rank(y) - rank(x)) || (time(y) - time(x)));
-    const byId = new Map(talks.map(t => [String(t.i), t]));
-    const kept = bounded((Array.isArray(oldHumor.videos) ? oldHumor.videos : []).filter(v => v && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(String(id)))), MAX);
-    const used = new Set(kept.flatMap(v => v.c.map(String)));
-    const oldest = MAX > 0 && kept.length >= MAX ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
-    let free = talks.filter(t => !used.has(String(t.i)) && time(t) > oldest);
-    const DAY = { morning: 0, home: 1, love: 2, icha: 2, miss: 2, other: 2, night: 3 };
-    const stamp = Date.now().toString(36);
-    const built = [];
-    while (free.reduce((n, t) => n + t.m.length, 0) >= SIZE - 2) {
-      const v = [];
-      const people = new Set();
-      let n = 0;
-      for (const strict of [true, false]) {
-        for (const t of free) {
-          if (n >= SIZE) break;
-          if (v.includes(t) || (n && n + t.m.length > SIZE + 2)) continue;
-          const who = [...new Set(t.m.map(x => String(x.h).toLowerCase()))];
-          if (strict && who.some(h => people.has(h))) continue;
-          v.push(t); who.forEach(h => people.add(h)); n += t.m.length;
-        }
-        if (n >= SIZE - 2) break;
-      }
-      if (n < SIZE - 2) break;
-      free = free.filter(t => !v.includes(t));
-      v.sort((x, y) => (DAY[x.k] ?? 2) - (DAY[y.k] ?? 2));
-      const morningMsgs = v.filter(t => t.k === 'morning').reduce((c, t) => c + t.m.length, 0);
-      /* g: how much of the video is greetings said with love (0 to 2). */
-      const g = Math.round(v.reduce((c, t) => c + t.gl * t.m.length, 0) / n * 10) / 10;
-      built.push({ i: 'v' + stamp + built.length.toString(36), at: v.reduce((m, t) => (time(t) > Date.parse(m || 0) ? t.at : m), ''), g, ...(morningMsgs * 2 > n ? { m: 1 } : {}), c: v.map(t => t.i) });
+  if (!humorReady) {
+    const file = { version: 2, lang: 'ja', made, principles, size: SIZE, talks: [], videos: [], replies, asked };
+    if (await save('stock-humor-ja.json', file)) changed = true;
+    console.log('Reply News: humor-accounts.json is missing or empty, so the humor stock was cleared (unregistered talks must not stay).');
+  } else {
+    const freshTalks = stories.map(talkCards).filter(t => t && talkKeep(t) && humorAllow(t) && !t.m.some(x => x.i && seenMsg.has(x.i)) && (t.m.forEach(x => x.i && seenMsg.add(x.i)), true));
+    const carriedTalks = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).filter(t => talkKeep(t) && humorAllow(t));
+    /* A talk already in a video claims its messages first, so that video is not broken by a new copy of the same lines. */
+    const freshIds = new Set(freshTalks.map(t => String(t.i)));
+    const carriedIds = new Set(carriedTalks.map(t => String(t.i)));
+    const inVideo = new Set((Array.isArray(oldHumor.videos) ? oldHumor.videos : []).flatMap(v => (v && v.c || []).map(String)));
+    const mergedTalks = mergeStock(carriedTalks, freshTalks, t => t.i);
+    const talkSeen = new Set();
+    const talks = [];
+    const claimOrder = mergedTalks.items.slice().sort((a, b) => (inVideo.has(String(a.i)) ? 0 : 1) - (inVideo.has(String(b.i)) ? 0 : 1));
+    for (const t of claimOrder) {
+      if (t.m.some(x => x.i && talkSeen.has(String(x.i)))) continue;
+      t.m.forEach(x => x.i && talkSeen.add(String(x.i)));
+      talks.push(t);
     }
-    /* Greetings said with love first, then the newest. Every video stays unless --videos sets a cap. */
-    const videos = bounded(kept.concat(built).sort((x, y) => (Math.round((y.g || 0) * 2) - Math.round((x.g || 0) * 2)) || ((Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0))), MAX);
+    let videos = [];
+    let built = [];
+    let kept = [];
+    if (talks.length) {
+      const rank = t => t.gl * 100 + Math.min(t.m.length, 8) * 6 + (Number(t.s) || 0);
+      talks.sort((x, y) => (rank(y) - rank(x)) || (time(y) - time(x)));
+      const byId = new Map(talks.map(t => [String(t.i), t]));
+      kept = bounded((Array.isArray(oldHumor.videos) ? oldHumor.videos : []).filter(v => v && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(String(id)))), MAX);
+      const used = new Set(kept.flatMap(v => v.c.map(String)));
+      const oldest = MAX > 0 && kept.length >= MAX ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
+      let free = talks.filter(t => !used.has(String(t.i)) && time(t) > oldest);
+      const DAY = { morning: 0, home: 1, love: 2, icha: 2, miss: 2, other: 2, night: 3 };
+      const stamp = Date.now().toString(36);
+      built = [];
+      while (free.reduce((n, t) => n + t.m.length, 0) >= SIZE - 2) {
+        const v = [];
+        const people = new Set();
+        let n = 0;
+        for (const strict of [true, false]) {
+          for (const t of free) {
+            if (n >= SIZE) break;
+            if (v.includes(t) || (n && n + t.m.length > SIZE + 2)) continue;
+            const who = [...new Set(t.m.map(x => String(x.h).toLowerCase()))];
+            if (strict && who.some(h => people.has(h))) continue;
+            v.push(t); who.forEach(h => people.add(h)); n += t.m.length;
+          }
+          if (n >= SIZE - 2) break;
+        }
+        if (n < SIZE - 2) break;
+        free = free.filter(t => !v.includes(t));
+        v.sort((x, y) => (DAY[x.k] ?? 2) - (DAY[y.k] ?? 2));
+        const morningMsgs = v.filter(t => t.k === 'morning').reduce((c, t) => c + t.m.length, 0);
+        /* g: how much of the video is greetings said with love (0 to 2). */
+        const g = Math.round(v.reduce((c, t) => c + t.gl * t.m.length, 0) / n * 10) / 10;
+        built.push({ i: 'v' + stamp + built.length.toString(36), at: v.reduce((m, t) => (time(t) > Date.parse(m || 0) ? t.at : m), ''), g, ...(morningMsgs * 2 > n ? { m: 1 } : {}), c: v.map(t => t.i) });
+      }
+      /* Greetings said with love first, then the newest. Every video stays unless --videos sets a cap. */
+      videos = bounded(kept.concat(built).sort((x, y) => (Math.round((y.g || 0) * 2) - Math.round((x.g || 0) * 2)) || ((Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0))), MAX);
+    }
+    /* Always write: an empty talk list clears old unregistered videos from the public stock. */
     const file = { version: 2, lang: 'ja', made, principles, size: SIZE, talks, videos, replies, asked };
     if (await save('stock-humor-ja.json', file)) changed = true;
-    const msgs = {}; talks.forEach(t => { msgs[t.m.length] = (msgs[t.m.length] || 0) + 1; });
-    const gl = [0, 1, 2].map(g => talks.filter(t => t.gl === g).length);
-    const addedN = talks.filter(t => freshIds.has(String(t.i)) && !carriedIds.has(String(t.i))).length;
-    console.log(`Reply News: ${talks.length} talks (${addedN} added this run, ${talks.length - addedN} already in the stock; messages per talk ${JSON.stringify(msgs)}; greeting with love ${gl[2]}, one of the two ${gl[1]}, neither ${gl[0]}); videos: ${videos.length} (${built.filter(v => videos.includes(v)).length} new, ${kept.filter(v => videos.includes(v)).length} kept, ${videos.filter(v => v.m).length} of the morning).`);
-  } else console.log('Reply News: no stories yet.');
+    if (talks.length) {
+      const msgs = {}; talks.forEach(t => { msgs[t.m.length] = (msgs[t.m.length] || 0) + 1; });
+      const gl = [0, 1, 2].map(g => talks.filter(t => t.gl === g).length);
+      const addedN = talks.filter(t => freshIds.has(String(t.i)) && !carriedIds.has(String(t.i))).length;
+      console.log(`Reply News: ${talks.length} talks from the memo accounts only (${addedN} added this run, ${talks.length - addedN} already in the stock; messages per talk ${JSON.stringify(msgs)}; greeting with love ${gl[2]}, one of the two ${gl[1]}, neither ${gl[0]}); videos: ${videos.length} (${built.filter(v => videos.includes(v)).length} new, ${kept.filter(v => videos.includes(v)).length} kept, ${videos.filter(v => v.m).length} of the morning).`);
+    } else console.log('Reply News: no talks from the memo accounts; humor stock cleared of unregistered content.');
+  }
 
   if (changed) await writeFile(path.join(OUT, '.changed'), made + '\n');
 }

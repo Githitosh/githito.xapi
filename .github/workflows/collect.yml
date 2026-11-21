@@ -61,46 +61,48 @@ jobs:
           echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
           mkdir -p public
           if git fetch --depth=1 origin api 2>/dev/null; then git archive FETCH_HEAD | tar -x -C public; fi
-      # The memo (news-famous.json, humor-accounts.json, and the account list ingest.mjs writes) is a
-      # PRIVATE repository, never among the public files. It is read before the requests, so an "account"
-      # issue is saved there and news.mjs / humor.mjs can read it in this same run. Names are not printed.
+      # News accounts (news-famous.json) are PUBLIC in docs/memo/. Humor accounts (humor-accounts.json)
+      # and reader-asked accounts stay in the PRIVATE memo only (githito.memo). Algorithms stay in this
+      # public repo. Humor account names are never published to the api branch.
       - name: The memo (a private repository)
         continue-on-error: true
         env:
           MEMO_TOKEN: ${{ secrets.MEMO_TOKEN }}
           MEMO_REPO: ${{ vars.MEMO_REPO || format('{0}/githito.memo', github.repository_owner) }}
         run: |
-          seed_memo() {
+          # Public source of truth for news registered accounts.
+          install_news_public() {
             mkdir -p "$RUNNER_TEMP/memo"
-            if [ -f docs/memo/news-famous.json ]; then cp docs/memo/news-famous.json "$RUNNER_TEMP/memo/news-famous.json"; fi
-            if [ -f docs/memo/humor-accounts.json ]; then cp docs/memo/humor-accounts.json "$RUNNER_TEMP/memo/humor-accounts.json"; fi
-            echo "XAPI_MEMO_DIR=$RUNNER_TEMP/memo" >> "$GITHUB_ENV"
+            if [ -f docs/memo/news-famous.json ]; then
+              cp docs/memo/news-famous.json "$RUNNER_TEMP/memo/news-famous.json"
+              echo "News accounts: docs/memo/news-famous.json (public)."
+            fi
           }
           if [ -z "$MEMO_TOKEN" ]; then
-            echo "No MEMO_TOKEN secret: using docs/memo registered-account seeds for this run."
-            seed_memo
+            echo "No MEMO_TOKEN: news from public docs/memo; humor accounts unavailable this run."
+            install_news_public
+            echo "XAPI_MEMO_DIR=$RUNNER_TEMP/memo" >> "$GITHUB_ENV"
             echo "### 記録（非公開リポジトリ）" >> "$GITHUB_STEP_SUMMARY"
-            echo "⚠️ MEMO_TOKEN が無いため、docs/memo の登録アカウント一覧で収集します。非公開リポジトリへの書き戻しはしません。" >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ MEMO_TOKEN が無いため、ニュースは公開の docs/memo/news-famous.json のみ。ユーモアのアカウント一覧（非公開）は使えません。" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           if git clone -q --depth=1 "https://x-access-token:${MEMO_TOKEN}@github.com/${MEMO_REPO}.git" "$RUNNER_TEMP/memo"; then
             git -C "$RUNNER_TEMP/memo" remote set-url origin "https://github.com/${MEMO_REPO}.git"
             echo "XAPI_MEMO_DIR=$RUNNER_TEMP/memo" >> "$GITHUB_ENV"
-            # First run: copy seed lists from docs/memo when the private memo does not have them yet.
-            if [ ! -f "$RUNNER_TEMP/memo/news-famous.json" ] && [ -f docs/memo/news-famous.json ]; then
-              cp docs/memo/news-famous.json "$RUNNER_TEMP/memo/news-famous.json"
-              echo "Seeded news-famous.json into the private memo."
+            # Always overlay the public news list (source of truth). Never copy humor lists from this repo.
+            install_news_public
+            if [ -f "$RUNNER_TEMP/memo/humor-accounts.json" ]; then
+              echo "Humor accounts: private memo only."
+            else
+              echo "Humor accounts: private memo has no humor-accounts.json yet (humor-find will create it)."
             fi
-            if [ ! -f "$RUNNER_TEMP/memo/humor-accounts.json" ] && [ -f docs/memo/humor-accounts.json ]; then
-              cp docs/memo/humor-accounts.json "$RUNNER_TEMP/memo/humor-accounts.json"
-              echo "Seeded humor-accounts.json into the private memo."
-            fi
-            echo "The memo is read from the private repository."
+            echo "The private repository is read (humor + asked accounts)."
           else
-            echo "The private repository could not be read: falling back to docs/memo registered-account seeds."
-            seed_memo
+            echo "Private memo could not be read: news from public docs/memo; humor accounts unavailable."
+            install_news_public
+            echo "XAPI_MEMO_DIR=$RUNNER_TEMP/memo" >> "$GITHUB_ENV"
             echo "### 記録（非公開リポジトリ）" >> "$GITHUB_STEP_SUMMARY"
-            echo "⚠️ 非公開リポジトリ ${MEMO_REPO} を読めなかったため、docs/memo の登録アカウント一覧で収集します。Secret の MEMO_TOKEN が無効（作り直したのに貼り替えていない、期限切れ、貼り付けの欠け）か、トークンにこのリポジトリの Contents の読み書き権限がありません。" >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ 非公開リポジトリ ${MEMO_REPO} を読めませんでした。ニュースは公開一覧のみ。ユーモア用アカウントは非公開のためこの実行では使いません。MEMO_TOKEN を確認してください。" >> "$GITHUB_STEP_SUMMARY"
           fi
       # Requests the owner sent as issues ("account": the accounts whose replies the News page may play,
       # saved only in the private memo; "talk"): read first, so that this run already collects for them.

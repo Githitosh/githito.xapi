@@ -1,11 +1,10 @@
 /* Humor accounts, and nothing else.
 
-   The only list is humor-accounts.json in the private memo (the folder --memo or XAPI_MEMO_DIR names):
-   { ja: [{ h }], en: [...] }. h is the account. This repository has no built-in humor list. A missing
-   folder or a missing file means there are no humor accounts (missing: true): nothing is used in its
-   place. Videos are made only from accounts on this list. humor-find.mjs may append ~10 new accounts
-   each half-hour run. Handles are not printed. News accounts (news-famous.json) are a different file;
-   humor does not read that list. */
+   The only list is humor-accounts.json in the PRIVATE memo (XAPI_MEMO_DIR / githito.memo):
+   { ja: [{ h }], en: [...] }. It is never kept in this public repository (privacy). A missing folder
+   or file means no humor accounts (missing: true). Videos use only this list. humor-find.mjs may
+   append ~10 accounts each half-hour run and write back to the private memo. Handles are not printed.
+   News accounts (public docs/memo/news-famous.json) are a different file; humor does not read that. */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 

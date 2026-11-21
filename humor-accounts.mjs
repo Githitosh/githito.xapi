@@ -4,7 +4,7 @@
    { ja: [{ h }], en: [...] }. It is never kept in this public repository (privacy). A missing folder
    or file means no humor accounts (missing: true). Videos use only this list. humor-find.mjs may
    append ~10 accounts each half-hour run and write back to the private memo. Handles are not printed.
-   News accounts (public docs/memo/news-famous.json) are a different file; humor does not read that. */
+   News accounts (private memo news-famous.json) are a different file; humor does not read that. */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 

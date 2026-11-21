@@ -6,7 +6,7 @@
 
    Only accounts listed in the private memo's humor-accounts.json (--memo or XAPI_MEMO_DIR) are read.
    New accounts are recorded first by humor-find.mjs (~20 loving-reply accounts each half-hour run);
-   this program then reads those registered accounts only. News accounts (news-famous.json) are a
+   this program then reads those registered accounts only. News accounts (private memo news-famous.json) are a
    different file; this program does not read them.
 
      node humor.mjs                  build once into ./public (Japanese)

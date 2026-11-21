@@ -2,8 +2,9 @@
    XAPI_MEMO_DIR or --memo names). No paper, no broadcaster, no built-in list of people, and no
    replies under someone else's post. When that file is missing, no news account is read.
 
-   A post kept here is the account's own (not a reply, not a repost), from the last three days, liked
-   by many (one in twenty thousand followers, a hundred at least): the best two of each person a run.
+   A post kept here is the account's own (not a reply, not a repost), from farther back in history
+   when needed (about a month), liked by many (one in twenty thousand followers, a hundred at least):
+   about five of each person a run, so the video stock can grow to about two thousand clips.
    The account is used when its name shows the expected part and it has 50,000 followers, or when it
    has 100,000 followers whatever the name. An account that is not that person is left for a week.
 
@@ -16,7 +17,7 @@
      v1/people-ja.json   { version, lang, updated, people: [{ id, h, n, f, l, t, on, own, g, at, found }] }
      v1/people-en.json   the same in English
 
-     node people.mjs --out public [--minutes 4] [--memo <folder>] */
+     node people.mjs --out public [--minutes 8] [--memo <folder>] */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -27,9 +28,11 @@ const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 const CONF = {
   out: path.resolve(opt('out', 'public')),
-  minutes: Number(opt('minutes', 6)) || 6,
-  hours: 72,
-  keep: 1000,
+  minutes: Number(opt('minutes', 8)) || 8,
+  /* Pull farther back so the stock can reach ~2000 clips (~5 per registered account). */
+  hours: Number(opt('hours', 720)) || 720,
+  keep: Number(opt('keep', 2000)) || 2000,
+  per: Number(opt('per', 5)) || 5,
 };
 const MEMO_DIR = opt('memo', process.env.XAPI_MEMO_DIR || '');
 const stamp = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z');
@@ -44,14 +47,56 @@ const famousOk = t => !(cruel(t) || personal(t) || slander(t) || alcohol(t) || t
 let MEMO = { ja: [], en: [], handles: new Set(), missing: true };
 let FAMOUS = { ja: [], en: [] };
 
-async function ownPosts(handle) {
-  const res = await fetch('https://api.fxtwitter.com/2/profile/' + handle + '/statuses?count=40', { headers: { 'user-agent': 'githito.xapi collector' }, signal: AbortSignal.timeout(25000) });
+async function fxJson(url) {
+  const res = await fetch(url, { headers: { 'user-agent': 'githito.xapi collector' }, signal: AbortSignal.timeout(25000) });
   const d = await res.json().catch(() => null);
   if (res.status !== 200 || !d || (d.code && d.code !== 200)) throw new Error('did not answer (' + res.status + ')');
-  return Array.isArray(d.results) ? d.results : [];
+  return d;
 }
-/* Their own posts of the last three days that many liked (one in twenty thousand followers, a hundred at
-   least): the best two of each person a run. Names are not printed. */
+
+/* Timeline plus a from: search so older posts in the lookback window are not missed. */
+async function ownPosts(handle) {
+  const byId = new Map();
+  const add = list => {
+    for (const st of list || []) {
+      if (!st || !st.id) continue;
+      byId.set(String(st.id), st);
+    }
+  };
+  try {
+    const d = await fxJson('https://api.fxtwitter.com/2/profile/' + handle + '/statuses?count=40');
+    add(Array.isArray(d.results) ? d.results : []);
+  } catch (e) { /* search below may still answer */ }
+  const until = Math.floor(Date.now() / 1000);
+  const since = until - CONF.hours * 3600;
+  try {
+    const q = `from:${handle} -filter:replies -filter:retweets since_time:${since} until_time:${until}`;
+    const d = await fxJson('https://api.fxtwitter.com/2/search?count=100&q=' + encodeURIComponent(q));
+    add(Array.isArray(d.results) ? d.results : []);
+  } catch (e) { /* timeline alone is enough when search refuses */ }
+  return [...byId.values()];
+}
+
+/* Keep at most CONF.per posts per account (best liked), then the newest overall up to CONF.keep. */
+function trimPeople(people) {
+  const byH = new Map();
+  for (const p of people) {
+    if (!p || !p.h || !p.id) continue;
+    const k = String(p.h).toLowerCase();
+    if (!byH.has(k)) byH.set(k, []);
+    byH.get(k).push(p);
+  }
+  const out = [];
+  for (const list of byH.values()) {
+    list.sort((a, b) => (Number(b.l) || 0) - (Number(a.l) || 0) || (Date.parse(b.at || 0) || 0) - (Date.parse(a.at || 0) || 0));
+    out.push(...list.slice(0, CONF.per));
+  }
+  out.sort((a, b) => (Date.parse(b.found || b.at) || 0) - (Date.parse(a.found || a.at) || 0));
+  return out.slice(0, CONF.keep);
+}
+
+/* Their own posts in the lookback window that many liked: about five of each person a run.
+   Names are not printed. Least-recently-read accounts are asked first so the whole list is covered. */
 async function famous(lang, people, have, readAt, notThem, minutes) {
   const list = (FAMOUS[lang] || []).filter(([h]) => !notThem[h] || Date.now() - Date.parse(notThem[h]) > 7 * 24 * 3600e3)
     .sort((x, y) => (Date.parse(readAt[x[0]] || 0) || 0) - (Date.parse(readAt[y[0]] || 0) || 0));
@@ -76,14 +121,14 @@ async function famous(lang, people, have, readAt, notThem, minutes) {
       const t = tidy(st.text);
       const likes = Number(st.likes) || 0;
       const at = st.created_at ? new Date(st.created_at).toISOString().replace(/\.\d+Z$/, 'Z') : '';
-      if (likes < least || Date.now() - Date.parse(at || 0) > 72 * 3600e3 || have.has(String(st.id)) || st.possibly_sensitive) return null;
+      if (likes < least || Date.now() - Date.parse(at || 0) > CONF.hours * 3600e3 || have.has(String(st.id)) || st.possibly_sensitive) return null;
       /* English: Latin text only (no CJK / Devanagari stand-ins from mixed posts). Japanese: enough kana/kanji. */
       if (lang === 'en'
         ? (t.length < 20 || t.length > 200 || /[ぁ-ヿ一-鿿\u0900-\u097F]/.test(t) || (t.match(/[A-Za-z]/g) || []).length < 12)
         : (len(t) < 8 || len(t) > 100 || (t.match(/[ぁ-ヿ一-鿿]/g) || []).length < 4)) return null;
       if (!famousOk(t)) return null;
       return { id: String(st.id), h: a.screen_name, n: String(a.name).slice(0, 40), f: Number(a.followers) || 0, l: likes, t, on: '', own: 1, g, at, found: stamp() };
-    }).filter(Boolean).sort((x, y) => y.l - x.l).slice(0, 2);
+    }).filter(Boolean).sort((x, y) => y.l - x.l).slice(0, CONF.per);
     found.forEach(p => { people.push(p); have.add(p.id); got++; });
     await sleep(1000);
   }
@@ -116,14 +161,14 @@ async function gather(lang, state, minutes) {
   const allow = new Set((FAMOUS[lang] || []).map(([h]) => h.toLowerCase()));
   /* Posts already kept are kept only when the account is still in the memo, and the post is their own.
      A reply under someone else's news, and any account that is not in the memo, is not refilled. */
-  const people = (Array.isArray(before.people) ? before.people : []).filter(p => p && p.id && p.t && p.own && p.h && allow.has(String(p.h).toLowerCase()) && fresh(p.found) && famousOk(p.t));
+  const people = (Array.isArray(before.people) ? before.people : []).filter(p => p && p.id && p.t && p.own && p.h && allow.has(String(p.h).toLowerCase()) && fresh(p.found || p.at) && famousOk(p.t));
   const have = new Set(people.map(p => p.id));
   const got = await famous(lang, people, have, state.read, state.not, minutes);
-  people.sort((a, b) => (Date.parse(b.found) || 0) - (Date.parse(a.found) || 0));
-  const out = { version: 1, lang, updated: stamp(), people: people.slice(0, CONF.keep) };
+  const trimmed = trimPeople(people);
+  const out = { version: 1, lang, updated: stamp(), people: trimmed };
   await writeFile(file, JSON.stringify(out) + '\n');
   if (got || out.people.length !== (Array.isArray(before.people) ? before.people.length : 0)) await writeFile(path.join(CONF.out, '.changed'), stamp() + '\n');
-  console.log(`News (${lang}): ${got} new posts kept; the file holds ${out.people.length}.`);
+  console.log(`News (${lang}): ${got} new posts kept; the file holds ${out.people.length} (about ${CONF.per} per account, lookback ${CONF.hours}h).`);
 }
 
 async function main() {
@@ -133,11 +178,11 @@ async function main() {
     ja: MEMO.ja.map(e => [e.h, e.k, e.g]),
     en: MEMO.en.map(e => [e.h, e.k, e.g]),
   };
-  if (MEMO.missing) console.log('No news-famous.json: no news account is read.');
+  if (MEMO.missing) console.log('No news-famous.json in the private memo: no news account is read.');
   else console.log(`News accounts from the private memo: ${FAMOUS.ja.length} Japanese, ${FAMOUS.en.length} English.`);
   const state = await loadState();
   await gather('ja', state.ja, CONF.minutes);
-  await gather('en', state.en, CONF.minutes);
+  await gather('en', state.en, Math.max(3, Math.round(CONF.minutes * 0.6)));
   await saveState(state);
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(e => { console.error(e.message || e); process.exit(1); });

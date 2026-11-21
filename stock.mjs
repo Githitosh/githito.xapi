@@ -17,6 +17,10 @@
    showing unregistered content. Humor also rejudges past talks: ordinary replies without clear romantic
    feeling (hearts / love words / funny romantic greetings) are pruned on every run.
 
+   News stock aims at about 2000 cards (~5 per registered account). Playback packing prefers unused cards,
+   then cards shown least recently, so the same clip does not loop. The half-hour collect loop and the
+   content bans are unchanged.
+
    The pages read these files and nothing else: they make no words of their own. A reader's page plays the
    newest video it has not played, or picks among the cards when the reader chose genres or words.
 
@@ -72,6 +76,10 @@ const OUT = path.resolve(opt('out', 'public'));
 const videosOpt = opt('videos', '');
 const MAX = videosOpt === '' ? 0 : Math.max(0, Number(videosOpt) || 0);
 const SIZE = Number(opt('size', 10)) || 10;
+/* News: about 2000 clips, about 5 per registered account; video packs prefer unused / less-recent. */
+const NEWS_STOCK = Number(opt('newsstock', 2000)) || 2000;
+const NEWS_PER = Number(opt('newsper', 5)) || 5;
+const NEWS_VIDEOS = Math.max(SIZE, Math.ceil(NEWS_STOCK / SIZE));
 const readJson = async (file, d) => { try { return JSON.parse(await readFile(file, 'utf8')); } catch (e) { return d; } };
 const time = x => Date.parse(x && x.at) || 0;
 const bounded = (list, max) => (max > 0 ? list.slice(0, max) : list);
@@ -102,33 +110,86 @@ function mergeStock(oldItems, freshItems, idOf) {
 }
 const cardKeep = c => c && c.id != null && Array.isArray(c.ja) && c.ja[0] && c.ja[1];
 const talkKeep = t => t && t.i != null && Array.isArray(t.m) && t.m.length >= 2 && t.m.every(x => x && Array.isArray(x.ja) && x.ja[0] && x.ja[1]);
+/* Last time a card id appeared in a video (0 = never). Used to prefer unused / less-recent stock. */
+function lastShownAt(videos) {
+  const last = new Map();
+  for (const v of Array.isArray(videos) ? videos : []) {
+    const at = Date.parse(v && v.at) || 0;
+    for (const id of (v && v.c) || []) {
+      const k = String(id);
+      if (!last.has(k) || at > last.get(k)) last.set(k, at);
+    }
+  }
+  return last;
+}
+/* Unused first, then least-recently shown; shuffle within the same bucket so packing is not fixed. */
+function preferUnused(cards, videos) {
+  const last = lastShownAt(videos);
+  return shuffle(cards).sort((a, b) => {
+    const la = last.get(String(a.id)) || 0;
+    const lb = last.get(String(b.id)) || 0;
+    if (!la !== !lb) return la ? 1 : -1;
+    return la - lb;
+  });
+}
+/* Cap at NEWS_PER per account, then NEWS_STOCK overall (liked / newer first). */
+function trimNewsCards(cards) {
+  const byH = new Map();
+  for (const c of cards) {
+    if (!cardKeep(c)) continue;
+    const k = String(c.h || '').toLowerCase();
+    if (!byH.has(k)) byH.set(k, []);
+    byH.get(k).push(c);
+  }
+  const out = [];
+  for (const list of byH.values()) {
+    list.sort((a, b) => (Number(b.l) || 0) - (Number(a.l) || 0) || time(b) - time(a));
+    out.push(...list.slice(0, NEWS_PER));
+  }
+  out.sort((a, b) => ((b.own || 0) - (a.own || 0)) || (Number(b.l) || 0) - (Number(a.l) || 0) || time(b) - time(a));
+  return out.slice(0, NEWS_STOCK);
+}
 /* This run's cards, plus every card the stock already held, when allow says the account may stay.
    Own words first, then the newest. A card allow refuses is not carried and not added. */
 function peopleCards(fresh, oldCards, allow) {
   const carried = (Array.isArray(oldCards) ? oldCards : []).filter(c => cardKeep(c) && !c.q && allow(c));
   const merged = mergeStock(carried, fresh.filter(allow), c => c.id);
-  const said = merged.items.sort((x, y) => ((y.own || 0) - (x.own || 0)) || (x.own ? (Number(y.l) || 0) - (Number(x.l) || 0) : time(y) - time(x)));
+  const said = trimNewsCards(merged.items);
   return { said, added: merged.added, carried: merged.carried };
 }
 
 /* Cards into videos. cards: in the order they should play (the first first). person(card): the accounts
    a card shows (nobody twice in a video); group(card): its genre or kind (at most cap of one in a video;
    the same one is not shown twice in a row). Videos whose cards are all still here are kept, and new
-   videos are added. max > 0 keeps only that many of the newest; 0 keeps every video. */
-function deal(cards, before, { person, group, cap, tag, max = MAX, tail, version }) {
+   videos are added. max > 0 keeps only that many of the newest; 0 keeps every video.
+   With preferFresh, free cards are unused / less-recently-shown first; when every card is already in a
+   video, the oldest packs are retired so those clips can be reshown instead of looping the same set. */
+function deal(cards, before, { person, group, cap, tag, max = MAX, tail, version, preferFresh = false }) {
   const byId = new Map(cards.map(c => [c.id, c]));
   const known = new Set(byId.keys());
   if (tail) tail.pool.forEach(c => known.add(c.id));
   /* A video made by an older version of this program is made again. */
-  const kept = bounded((Array.isArray(before) ? before : []).filter(v => v && Array.isArray(v.c) && v.c.length && (v.v || 1) === (version || 1) && v.c.every(id => known.has(id))), max);
-  const used = new Set(kept.flatMap(v => v.c));
+  let kept = bounded((Array.isArray(before) ? before : []).filter(v => v && Array.isArray(v.c) && v.c.length && (v.v || 1) === (version || 1) && v.c.every(id => known.has(id))), max);
+  const usedOf = list => new Set(list.flatMap(v => (v.c || []).map(String)));
+  let used = usedOf(kept);
   /* A cap that is already full takes only cards newer than its oldest video (older ones would be
      dealt, and dropped again, at every run). With no cap, every card not yet in a video can join one. */
-  const oldest = max > 0 && kept.length >= max ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
-  /* Shuffle so the same accounts are not always packed into the first videos. */
-  let free = shuffle(cards.filter(c => !used.has(c.id) && time(c) > oldest));
+  const freeNow = () => {
+    const oldest = max > 0 && kept.length >= max ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
+    return cards.filter(c => !used.has(String(c.id)) && time(c) > oldest);
+  };
+  /* Prefer unused / less-recent; if nothing free and we still want packs, retire oldest videos. */
+  if (preferFresh) {
+    let guard = kept.length + 1;
+    while (freeNow().length < SIZE && kept.length && guard-- > 0) {
+      kept = kept.slice().sort((a, b) => (Date.parse(a.at || 0) || 0) - (Date.parse(b.at || 0) || 0));
+      kept.shift();
+      used = usedOf(kept);
+    }
+  }
+  let free = preferFresh ? preferUnused(freeNow(), before) : shuffle(freeNow());
   /* tail: cards that close each video (what people said, three in ten), each used once. */
-  const tails = tail ? shuffle(tail.pool.filter(c => !used.has(c.id))) : [];
+  const tails = tail ? shuffle(tail.pool.filter(c => !used.has(String(c.id)))) : [];
   const made = [];
   const stamp = Date.now().toString(36);
   let lastPeople = new Set();
@@ -138,7 +199,7 @@ function deal(cards, before, { person, group, cap, tag, max = MAX, tail, version
     const size = SIZE - end.length;
     if (free.length < size) break;
     end.forEach(c => tails.splice(tails.indexOf(c), 1));
-    free = shuffle(free);
+    free = preferFresh ? preferUnused(free, before.concat(made)) : shuffle(free);
     const v = [];
     const people = new Set();
     const groups = {};
@@ -223,12 +284,14 @@ async function main() {
   } else {
     const { said, added, carried } = peopleCards(freshSaid, oldNews.cards, allowJa);
     const dropped = (Array.isArray(oldNews.cards) ? oldNews.cards : []).filter(c => cardKeep(c) && !allowJa(c)).length;
-    /* version 4: drop videos built from the old non-registered / non-own generator. */
-    const d = deal(said, oldNews.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 4 });
+    /* version 4: drop videos built from the old non-registered / non-own generator.
+       Prefer unused / less-recent cards; cap near NEWS_STOCK so the page does not loop a tiny set. */
+    const newsMax = MAX > 0 ? MAX : NEWS_VIDEOS;
+    const d = deal(said, oldNews.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 4, max: newsMax, preferFresh: true });
     const file = { version: 2, lang: 'ja', made, principles, size: SIZE, cards: said, videos: d.videos, replies, asked };
     if (await save('stock-news-ja.json', file)) changed = true;
     const cuts = {}; said.forEach(c => { cuts[c.cut] = (cuts[c.cut] || 0) + 1; });
-    console.log(`News: ${said.length} cards from registered accounts (${added} added this run, ${carried} already in the stock) ${JSON.stringify(cuts)}; ${dropped} unregistered/non-own cards dropped; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept), ${d.waiting} cards wait for the next video; ${replies.length} replies to asked accounts.`);
+    console.log(`News: ${said.length} cards from registered accounts (${added} added this run, ${carried} already in the stock; target ~${NEWS_STOCK}, ~${NEWS_PER}/account) ${JSON.stringify(cuts)}; ${dropped} unregistered/non-own cards dropped; videos: ${d.videos.length} (${d.made} new, ${d.kept} kept), ${d.waiting} cards wait for the next video; ${replies.length} replies to asked accounts.`);
   }
 
   /* News in English: the memo's English accounts (people-en.json), own posts only. */
@@ -244,10 +307,11 @@ async function main() {
   } else {
     const en = peopleCards(freshEn, oldEn.cards, allowEn);
     const droppedEn = (Array.isArray(oldEn.cards) ? oldEn.cards : []).filter(c => cardKeep(c) && !allowEn(c)).length;
-    const enDeal = deal(en.said, oldEn.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 4 });
+    const enMax = MAX > 0 ? MAX : NEWS_VIDEOS;
+    const enDeal = deal(en.said, oldEn.videos, { person: c => [String(c.h).toLowerCase()], group: c => c.g || 'other', cap: 4, version: 4, max: enMax, preferFresh: true });
     const enFile = { version: 2, lang: 'en', made, principles, size: SIZE, cards: en.said, videos: enDeal.videos };
     if (await save('stock-news-en.json', enFile)) changed = true;
-    console.log(`News in English: ${en.said.length} cards from registered accounts (${en.added} added this run, ${en.carried} already in the stock); ${droppedEn} unregistered/non-own cards dropped; videos: ${enDeal.videos.length} (${enDeal.made} new, ${enDeal.kept} kept).`);
+    console.log(`News in English: ${en.said.length} cards from registered accounts (${en.added} added this run, ${en.carried} already in the stock; target ~${NEWS_STOCK}); ${droppedEn} unregistered/non-own cards dropped; videos: ${enDeal.videos.length} (${enDeal.made} new, ${enDeal.kept} kept).`);
   }
 
   /* Reply News / Humor: a video is conversations, whole, about ten messages: greetings said with love first,

@@ -6,17 +6,19 @@
 
      v1/stock-news-ja.json   News: cards { id, h, n, g, at, kw, ja: [what, who], how, q? }
      v1/stock-news-en.json   News in English: cards from registered English accounts (nothing translated)
-     v1/stock-humor-ja.json  Reply News: talks { i, k, at, s, gl, m: [{ i, s, h: "s0", to?, ja: [part, whole] }] }
-                             (a talk is a conversation; h/to are opaque speaker ids "s0"/"s1", never real @handles)
+     v1/stock-humor-ja.json  Reply News: talks { i, k, at, s, gl, m: [{ i, h, url, to?, ja: [part, whole] }] }
+                             (a talk is a conversation; h is a real @handle; url is https://x.com/.../status/...)
      both: videos [{ i, at, c: [card or talk ids], m?, slot? }], replies (to the accounts readers asked for), asked
 
    News cards are the private memo's accounts' own posts only (news-famous.json → people.mjs). A card
    that is not their own post, or whose account is not in that file, is dropped and is not refilled.
-   Humor talks prefer humor-accounts.json (at least one real speaker on the list). Opaque s0/s1 talks
-   already passed that check. When the humor list is missing or prune would empty the file, existing
-   anonymized talks/videos are kept (never wiped), and fresh anonymized stories from humor-ja.json are
-   folded in so Reply News still has playable stock. News still clears when its memo list is missing.
-   Humor also rejudges past talks: ordinary replies without clear romantic feeling are pruned on every run.
+   Humor talks prefer humor-accounts.json (at least one real speaker on the list). Public registered
+   humor accounts keep real @handles and real X status URLs (OK to show — more viewers is welcome).
+   Legacy opaque s0/s1 talks without a real handle cannot form an X URL and are dropped so clips never
+   point at broken non-X links. When the humor list is missing or prune would empty the file, prior
+   linkable talks/videos are kept (never wiped). Humor also rejudges past talks: ordinary replies
+   without clear romantic feeling (hearts / couple greetings / love words only) are pruned on every
+   run. Stale talks older than ~72h are demoted so newest romance surfaces instead of old stock loops.
 
    News stock aims at about 2000 cards (~5 per registered account). Playback packing prefers unused cards,
    then cards shown least recently, so the same clip does not loop. The half-hour collect loop and the
@@ -50,38 +52,37 @@ function pruneRomanticTalk(t, lang = 'ja') {
   if (!m.some(x => clearlyRomantic(msgText(x), lang))) return null;
   return { ...t, m };
 }
-/* Public humor stock: comment text only. No real account handles or profile names.
-   Speakers are opaque indices. news-shorts still requires message.h (stockGood / romanceCards),
-   so we publish h as "s0", "s1", … — not a real @handle — and to as the previous speaker's opaque id. */
-function anonymizeTalk(t) {
+/* Public humor stock: real @handles + real X status URLs (registered public accounts — OK to show).
+   Legacy opaque s0/s1 without a real handle cannot make https://x.com/.../status/... and are dropped. */
+const isOpaqueSpeaker = h => /^s\d+$/i.test(String(h || ''));
+const speakerKey = x => (x && x.h != null ? String(x.h).toLowerCase() : (x && x.s != null ? 's' + x.s : ''));
+const xStatusUrl = (handle, id) => {
+  const h = String(handle || '').replace(/^@+/, '');
+  const i = String(id || '');
+  if (!h || !i || isOpaqueSpeaker(h) || !/^\d+$/.test(i)) return '';
+  return `https://x.com/${h}/status/${i}`;
+};
+function publishTalk(t) {
   if (!t || !Array.isArray(t.m)) return null;
-  const speakers = new Map();
-  let n = 0;
-  const sid = h => {
-    const k = String(h == null ? '' : h).toLowerCase();
-    /* Already-opaque keys from a prior publish ("s0") keep their index. */
-    if (/^s\d+$/.test(k)) {
-      const i = Number(k.slice(1));
-      if (!speakers.has(k)) speakers.set(k, i);
-      if (i >= n) n = i + 1;
-      return speakers.get(k);
-    }
-    if (!k) return n;
-    if (!speakers.has(k)) speakers.set(k, n++);
-    return speakers.get(k);
-  };
   const m = [];
   for (const x of t.m) {
-    const key = x.h != null ? x.h : (x.s != null ? 's' + x.s : '');
-    const s = sid(key);
-    const h = 's' + s;
-    m.push({ i: String(x.i || ''), s, h, ...(m.length ? { to: m[m.length - 1].h } : {}), ja: x.ja });
+    const raw = String(x.h != null ? x.h : (x.s != null ? 's' + x.s : '')).replace(/^@+/, '');
+    if (!raw || isOpaqueSpeaker(raw)) return null;
+    const id = String(x.i || '');
+    const url = (x.url && /^https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[^/]+\/status\/\d+/i.test(String(x.url))
+      ? String(x.url).replace(/[?#].*$/, '').replace(/\/\/(?:www\.)?twitter\.com\//i, '//x.com/')
+      : xStatusUrl(raw, id));
+    if (!url) return null;
+    const row = { i: id, h: raw, url, ja: x.ja };
+    if (x.s != null) row.s = x.s;
+    if (m.length) row.to = m[m.length - 1].h;
+    m.push(row);
   }
-  if (m.length < 2 || m[0].s === m[1].s) return null;
+  if (m.length < 2 || m[0].h.toLowerCase() === m[1].h.toLowerCase()) return null;
   return { i: t.i, k: t.k || '', at: t.at || '', s: t.s, gl: t.gl, m };
 }
-const speakerKey = x => (x && x.h != null ? String(x.h).toLowerCase() : (x && x.s != null ? 's' + x.s : ''));
-const isOpaqueSpeaker = h => /^s\d+$/i.test(String(h || ''));
+/* Alias kept for thin-stock / missing-memo fold paths that still call anonymizeTalk. */
+const anonymizeTalk = publishTalk;
 
 const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -347,15 +348,30 @@ async function main() {
   const stories = Array.isArray(humor.stories) ? humor.stories : [];
   const seenMsg = new Set();
   const MIN_HUMOR_TALKS = 24;
+  /* Prefer realtime feel: drop talks older than 72h when a timestamp is known. */
+  const HUMOR_AGE_MS = 72 * 3600e3;
+  const humorYoung = t => { const ms = time(t); return !ms || (Date.now() - ms) < HUMOR_AGE_MS; };
+  /* Prior stock folded back only when it still passes the romance prune (never reintroduce ordinary). */
+  const priorRomantic = list => (Array.isArray(list) ? list : [])
+    .map(anonymizeTalk).filter(talkKeep)
+    .map(t => pruneRomanticTalk(t, 'ja')).filter(Boolean)
+    .filter(humorYoung);
   const packHumorVideos = (rawTalks, oldVideos) => {
     let videos = [];
     let built = [];
     let kept = [];
     if (!rawTalks.length) return { videos, built, kept };
-    const rank = t => t.gl * 100 + Math.min(t.m.length, 8) * 6 + (Number(t.s) || 0);
-    const ordered = rawTalks.slice().sort((x, y) => (rank(y) - rank(x)) || (time(y) - time(x)));
+    /* Greeting-with-love first, then newest (realtime reply-news feel over stale loops). */
+    const ageBoost = t => { const ms = time(t); return ms ? Math.max(0, 72 - (Date.now() - ms) / 3600e3) : 0; };
+    const rank = t => t.gl * 100 + Math.min(t.m.length, 8) * 6 + (Number(t.s) || 0) + ageBoost(t);
+    const ordered = rawTalks.slice().filter(humorYoung).sort((x, y) => (rank(y) - rank(x)) || (time(y) - time(x)));
     const byId = new Map(ordered.map(t => [String(t.i), t]));
-    kept = bounded((Array.isArray(oldVideos) ? oldVideos : []).filter(v => v && v.slot && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(String(id)))), MAX);
+    /* Retire old videos whose talks aged out or failed romance rejudge; rebuild from fresher talks. */
+    kept = bounded((Array.isArray(oldVideos) ? oldVideos : []).filter(v => {
+      if (!(v && v.slot && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(String(id))))) return false;
+      const newest = Math.max(...v.c.map(id => time(byId.get(String(id))) || 0));
+      return !newest || (Date.now() - newest) < HUMOR_AGE_MS;
+    }), MAX);
     const used = new Set(kept.flatMap(v => v.c.map(String)));
     const oldest = MAX > 0 && kept.length >= MAX ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
     let free = ordered.filter(t => !used.has(String(t.i)) && time(t) > oldest);
@@ -439,9 +455,9 @@ async function main() {
   }).map(t => pruneRomanticTalk(t, 'ja')).filter(Boolean);
 
   if (!humorReady) {
-    /* Memo missing must not wipe Reply News. Keep last stock, fold in fresh anonymized stories, pack videos if needed. */
-    const prior = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).map(anonymizeTalk).filter(talkKeep);
-    const fresh = storiesToTalks(stories).map(anonymizeTalk).filter(Boolean);
+    /* Memo missing must not wipe Reply News. Keep last *romantic* stock only, fold in fresh stories. */
+    const prior = priorRomantic(oldHumor.talks);
+    const fresh = storiesToTalks(stories).map(anonymizeTalk).filter(Boolean).filter(humorYoung);
     const merged = mergeStock(prior, fresh, t => t.i);
     const keptTalks = merged.items;
     let keptVideos = (Array.isArray(oldHumor.videos) ? oldHumor.videos : [])
@@ -450,9 +466,9 @@ async function main() {
       const packed = packHumorVideos(keptTalks, keptVideos);
       if (packed.videos.length) keptVideos = packed.videos;
     }
-    const file = { version: 3, lang: 'ja', made, principles, size: SIZE, privacy: 'text-only', talks: keptTalks, videos: keptVideos, replies, asked };
+    const file = { version: 4, lang: 'ja', made, principles, size: SIZE, privacy: 'handles-ok', talks: keptTalks, videos: keptVideos, replies, asked };
     if (await save('stock-humor-ja.json', file)) changed = true;
-    console.log(`Reply News: humor-accounts.json is missing or empty; kept ${keptTalks.length} anonymized talks / ${keptVideos.length} videos (not cleared; bootstrap stories folded in).`);
+    console.log(`Reply News: humor-accounts.json is missing or empty; kept ${keptTalks.length} romantic talks / ${keptVideos.length} videos (ordinary/stale pruned; bootstrap stories folded in).`);
   } else {
     const jstH = iso => { const ms = Date.parse(iso || 0); return ms ? new Date(ms + 9 * 3600e3).getUTCHours() : -1; };
     const slotOfHour = h => (h >= 4 && h < 11 ? 'morning' : (h >= 21 || (h >= 0 && h < 4) ? 'night' : 'day'));
@@ -471,10 +487,10 @@ async function main() {
       return pruneRomanticTalk(r, 'ja');
     };
     const beforeCarry = Array.isArray(oldHumor.talks) ? oldHumor.talks.length : 0;
-    const freshTalks = stories.map(talkCards).map(prepare).filter(t => t && !t.m.some(x => x.i && seenMsg.has(x.i)) && (t.m.forEach(x => x.i && seenMsg.add(x.i)), true));
-    const carriedTalks = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).map(prepare).filter(Boolean);
+    const freshTalks = stories.map(talkCards).map(prepare).filter(t => t && humorYoung(t) && !t.m.some(x => x.i && seenMsg.has(x.i)) && (t.m.forEach(x => x.i && seenMsg.add(x.i)), true));
+    const carriedTalks = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).map(prepare).filter(t => t && humorYoung(t));
     const prunedOrdinary = Math.max(0, beforeCarry - carriedTalks.length);
-    if (prunedOrdinary) console.log(`Reply News: pruned ${prunedOrdinary} old talks that were not clearly romantic (ordinary comments dropped).`);
+    if (prunedOrdinary) console.log(`Reply News: pruned ${prunedOrdinary} old talks that were not clearly romantic or were stale (>72h).`);
     /* A talk already in a video claims its messages first, so that video is not broken by a new copy of the same lines. */
     const freshIds = new Set(freshTalks.map(t => String(t.i)));
     const carriedIds = new Set(carriedTalks.map(t => String(t.i)));
@@ -482,7 +498,8 @@ async function main() {
     const mergedTalks = mergeStock(carriedTalks, freshTalks, t => t.i);
     const talkSeen = new Set();
     const rawTalks = [];
-    const claimOrder = mergedTalks.items.slice().sort((a, b) => (inVideo.has(String(a.i)) ? 0 : 1) - (inVideo.has(String(b.i)) ? 0 : 1));
+    /* Prefer not-yet-in-video fresh talks, then newest. */
+    const claimOrder = mergedTalks.items.slice().sort((a, b) => (inVideo.has(String(a.i)) ? 1 : 0) - (inVideo.has(String(b.i)) ? 1 : 0) || (time(b) - time(a)));
     for (const t of claimOrder) {
       if (t.m.some(x => x.i && talkSeen.has(String(x.i)))) continue;
       t.m.forEach(x => x.i && talkSeen.add(String(x.i)));
@@ -490,31 +507,34 @@ async function main() {
     }
     let { videos, built, kept } = packHumorVideos(rawTalks, oldHumor.videos);
     let talks = rawTalks.map(anonymizeTalk).filter(Boolean);
-    /* Never wipe Reply News to empty: if prune left nothing, keep the previous anonymized stock. */
+    /* Never wipe Reply News to empty: if prune left nothing, keep prior *romantic* stock only. */
     if (!talks.length) {
-      talks = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).map(anonymizeTalk).filter(talkKeep);
+      talks = priorRomantic(oldHumor.talks);
       const byId = new Set(talks.map(t => String(t.i)));
       videos = (Array.isArray(oldHumor.videos) ? oldHumor.videos : [])
         .filter(v => v && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(String(id))));
-      built = [];
-      kept = videos.slice();
-      console.log(`Reply News: prune left no talks; kept prior ${talks.length} anonymized talks / ${videos.length} videos (not cleared).`);
+      if (talks.length && !videos.length) {
+        const packed = packHumorVideos(talks, []);
+        videos = packed.videos; built = packed.built; kept = packed.kept;
+      } else { built = []; kept = videos.slice(); }
+      console.log(`Reply News: prune left no talks; kept prior ${talks.length} romantic talks / ${videos.length} videos (ordinary/stale not restored).`);
     } else if (talks.length < MIN_HUMOR_TALKS || !videos.length) {
-      /* Thin stock: fold prior anonymized talks back in so time-band videos stay playable. */
-      const prior = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).map(anonymizeTalk).filter(talkKeep);
+      /* Thin stock: fold prior romantic talks only (never ordinary/stale). */
+      const prior = priorRomantic(oldHumor.talks);
       const merged = mergeStock(prior, talks, t => t.i);
       talks = merged.items;
       const packed = packHumorVideos(talks, videos.length ? videos : oldHumor.videos);
       if (packed.videos.length) { videos = packed.videos; built = packed.built; kept = packed.kept; }
     }
-    const file = { version: 3, lang: 'ja', made, principles, size: SIZE, privacy: 'text-only', talks, videos, replies, asked };
+    const file = { version: 4, lang: 'ja', made, principles, size: SIZE, privacy: 'handles-ok', talks, videos, replies, asked };
     if (await save('stock-humor-ja.json', file)) changed = true;
     if (talks.length) {
       const msgs = {}; talks.forEach(t => { msgs[t.m.length] = (msgs[t.m.length] || 0) + 1; });
       const gl = [0, 1, 2].map(g => talks.filter(t => t.gl === g).length);
       const addedN = talks.filter(t => freshIds.has(String(t.i)) && !carriedIds.has(String(t.i))).length;
-      console.log(`Reply News: ${talks.length} clearly-romantic talks, handles stripped (${addedN} added this run, ${talks.length - addedN} already in the stock; messages per talk ${JSON.stringify(msgs)}; greeting with love ${gl[2]}, one of the two ${gl[1]}, neither ${gl[0]}); videos: ${videos.length} (${built.filter(v => videos.includes(v)).length} new, ${kept.filter(v => videos.includes(v)).length} kept, ${videos.filter(v => v.m).length} of the morning).`);
-    } else console.log('Reply News: no anonymized talks available yet (memo ready, waiting for romance stock).');
+      const withUrl = talks.filter(t => (t.m || []).every(x => x.url)).length;
+      console.log(`Reply News: ${talks.length} clearly-romantic talks with real @handles + X URLs (${withUrl} fully linked; ${addedN} added this run, ${talks.length - addedN} already in the stock; messages per talk ${JSON.stringify(msgs)}; greeting with love ${gl[2]}, one of the two ${gl[1]}, neither ${gl[0]}); videos: ${videos.length} (${built.filter(v => videos.includes(v)).length} new, ${kept.filter(v => videos.includes(v)).length} kept, ${videos.filter(v => v.m).length} of the morning).`);
+    } else console.log('Reply News: no linkable romance talks yet (need real @handles from Collect; opaque s0/s1 stock was dropped).');
   }
 
   if (changed) await writeFile(path.join(OUT, '.changed'), made + '\n');

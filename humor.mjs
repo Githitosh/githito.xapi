@@ -66,14 +66,22 @@ const ICHA = {
   ja: /愛してる|あいしてる|いちゃ|イチャ|くっつ[きいこ]|甘え|ぎゅーって|ちゅーして|ちゅっ|一生離さない|ずっと一緒|大好きすぎ/,
   en: /i love you|love you so much|love you forever|cuddle|snuggle|can'?t wait to (?:see|hold) you/i,
 };
-/* Cute, loving ways of saying things are preferred to plain greetings. */
+/* Cute affection play (ぎゅー / だよ〜). Couple daily greetings live in COUPLE_GREET. */
 const CUTE = {
-  ja: /おやすみん|おやすー|おやぴ|おやすみなさいませ|ねんね|すや|おはおは|おはよーだよ|おっはー|おはよん|おはよぉ|おはよーん|だいしゅき|しゅき|すきすき|大好きだよ|好きだよ|すきだよ|ぎゅー|ちゅ|なでなで|よしよし|がんばったね|会いたいよ|♡|❤|💕|💗|💖|🥰|😘|😚|だよ[〜ー♡❤]|ね[〜ー♡]|よ[〜ー♡]/,
-  en: /night night|nighty|sleep tight|sweet dreams|sunshine|rise and shine|love you more|miss you more|love ya|\bbabe\b|\bbaby\b|honey|cutie|xoxo|xxx|💕|🥰|😘|😚/i,
+  /* Hearts are handled by HEART (short lines only); do not list them here. */
+  ja: /おやすみん|おやすー|おやぴ|おやすみなさいませ|ねんね|すや|だいしゅき|しゅき|すきすき|大好きだよ|好きだよ|すきだよ|ぎゅー|ちゅ[ー〜っ]|なでなで|よしよし|がんばったね|会いたいよ|(?:好き|すき|大好き|だいすき|愛してる)?だよ[〜ー♡❤]/,
+  en: /night night|nighty|sleep tight|sweet dreams|sunshine|rise and shine|love you more|miss you more|love ya|\bbabe\b|\bbaby\b|honey|cutie|xoxo|xxx/i,
 };
+/* Couple-tone greetings (hearts optional): elongated / playful forms and homecoming talk.
+   Bare おはよう / こんにちは alone are plain and stay out. */
+const COUPLE_GREET = {
+  ja: /おはよーなのだ|おはようなのだ|おはよ[〜～ー]+(?:なのだ|だよ|ん)?|おはおは|おっはー|おはよん|おはよぉ|おかえり(?:なさい)?|いってらっしゃい|行ってらっしゃい|いってきます|行ってきます|ただいま|おつかれさま[〜ー♡❤]|お疲れさま[〜ー♡❤]/,
+  en: /night night|nighty|sleep tight|sweet dreams|sunshine|rise and shine|welcome home|home safe|miss you already|heading out|be safe/i,
+};
+/* Bare everyday greetings with no couple tone. */
 const PLAIN = {
-  ja: /^(?:おやすみ(?:なさい)?|おはよ(?:う|ー)?(?:ございます)?|ただいま|おかえり|おつかれ(?:さま)?|お疲れ(?:様)?)[。！!〜~ー]?\s*[\p{Extended_Pictographic}‍️\s]*$/u,
-  en: /^(?:good ?night|good ?morning|night|morning|hi|hey)[.!]?\s*[\p{Extended_Pictographic}‍️\s]*$/iu,
+  ja: /^(?:こんにちは|こんばんは|おやすみ(?:なさい)?|おはよう|おはよ|おつかれ(?:さま)?|お疲れ(?:様)?)[。！!？?\s]*[\p{Extended_Pictographic}‍️\s]*$/u,
+  en: /^(?:good ?night|good ?morning|night|morning|hi|hey|hello)[.!]?\s*[\p{Extended_Pictographic}‍️\s]*$/iu,
 };
 /* Everyday couple talk: greetings, thanks, missing each other, and love. */
 const LOVE = {
@@ -236,22 +244,26 @@ async function parentOtherWay(handle, id) {
 }
 const whenOf = st => { const t = st && (st.created_timestamp ? st.created_timestamp * 1000 : Date.parse(st.created_at || '')); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString().replace(/\.\d+Z$/, 'Z') : ''; };
 /* ---------- pairs ---------- */
-const replyScore = (text, lang) => (charLen(text) <= SHORT[lang] ? 4 : 0) + (CUTE[lang].test(text) ? 5 : 0) + (ICHA[lang].test(text) ? 6 : 0) + (PLAIN[lang].test(text) ? -5 : 0) + Math.random() * 3;
-/* Clearly romantic replies only: heart / affection emoji, clear love words, or a funny romantic
-   greeting form (おはよん♡, night night babe). Ordinary replies on a romance thread (うん, そうだね,
-   plain おはよう / thanks with no feeling) are dropped — they are not interesting here. */
+const replyScore = (text, lang) => (charLen(text) <= SHORT[lang] ? 4 : 0) + (CUTE[lang].test(text) || COUPLE_GREET[lang].test(text) ? 5 : 0) + (ICHA[lang].test(text) ? 6 : 0) + (PLAIN[lang].test(text) ? -5 : 0) + Math.random() * 3;
+/* Clearly romantic replies only:
+   1) heart / affection emoji, OR
+   2) clear love / couple feeling words, OR
+   3) couple-style greetings (おはよーなのだ / おはよ〜 / おかえり / いってらっしゃい / …).
+   Ordinary comments and bare おはよう / こんにちは alone are dropped. */
 const HEART = /♡|❤|♥|💕|💗|💖|💘|💞|🥰|😘|😚|😍|🤗/;
-/* Clear romance: hearts, affection words (including bare 好き/すき), cute greeting play. Plain おはよう alone is still out (CUTE / HEART required for greetings). */
 const FEELING = {
-  ja: /大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|好き|すき|愛してる|あいしてる|愛して|ぎゅ[ー〜っ]*|ちゅ[ー〜っ]*|なでなで|よしよし|会いたい|あいたい|いちゃ|イチャ|くっつ[きいこ]|甘え|しゅき|ずっと一緒|一生離さない|かわいい|可愛い/,
+  /* ぎゅ／ちゅ need elongation or a boundary so すぎゅ / にちゅ does not match. */
+  ja: /大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|好き|すき|愛してる|あいしてる|愛して|ぎゅ[ー〜っ]+|(?:^|[^ぁ-ん])ぎゅ(?:$|[^ぁ-ん])|ちゅ[ー〜っ]+|(?:^|[^ぁ-ん])ちゅ(?:$|[^ぁ-ん])|なでなで|よしよし|会いたい|あいたい|いちゃ|イチャ|くっついて|くっついたい|甘え|しゅき|ずっと一緒|一生離さない|かわいい|可愛い/,
   en: /i love you|love you(?: so much| more| forever)?|love ya|luv u|\bily\b|cuddle|snuggle|miss you(?: more)?|my love|\bbabe\b|\bbaby\b|honey|sweetheart|cutie|xoxo|night night|nighty|sunshine|rise and shine|sleep tight|sweet dreams/i,
 };
 export function clearlyRomantic(text, lang) {
-  const t = String(text || '');
+  const t = String(text || '').trim();
   if (!t) return false;
-  if (HEART.test(t) || FEELING[lang].test(t)) return true;
-  /* Cute romantic greeting forms already encode loving playfulness; plain greetings do not. */
-  if (CUTE[lang].test(t)) return true;
+  /* Bare everyday greetings never count, even if they look short and friendly. */
+  if (PLAIN[lang].test(t) && !HEART.test(t) && !FEELING[lang].test(t) && !COUPLE_GREET[lang].test(t) && !CUTE[lang].test(t)) return false;
+  if (FEELING[lang].test(t) || COUPLE_GREET[lang].test(t) || CUTE[lang].test(t)) return true;
+  /* Heart emoji: keep short couple-ish lines; ordinary comments that only sprinkle a heart are out. */
+  if (HEART.test(t) && charLen(t) <= (lang === 'en' ? 48 : 16)) return true;
   return false;
 }
 /* A post and the reply to it, when both may play: two different people, neither famous, the reply
@@ -275,9 +287,12 @@ function pairFrom(pst, cst, lang) {
   if (!(WORDS[lang].test(bText) || HEART.test(bText))) return why('reply has no romantic words');
   const mutual = parentOf(pst).who.toLowerCase() === bHandle.toLowerCase();
   if (!LOVE[lang].test(aText) && !mutual && charLen(aText) > (lang === 'en' ? 40 : 16)) return why('the post is about something else');
-  if (PLAIN[lang].test(aText) && PLAIN[lang].test(bText) && !HEART.test(aText + bText) && !CUTE[lang].test(bText)) return why('two plain greetings');
-  const score = replyScore(bText, lang) + (CUTE[lang].test(aText) ? 4 : 0) + (ICHA[lang].test(aText) ? 4 : 0) + (mutual ? 6 : 0);
+  if (PLAIN[lang].test(aText) && PLAIN[lang].test(bText) && !HEART.test(aText + bText) && !COUPLE_GREET[lang].test(bText) && !CUTE[lang].test(bText)) return why('two plain greetings');
   const at = whenOf(cst) || whenOf(pst);
+  const ageH = (() => { const ms = Date.parse(at || 0); return Number.isFinite(ms) && ms ? (Date.now() - ms) / 3600e3 : 24; })();
+  const score = replyScore(bText, lang) + (CUTE[lang].test(aText) || COUPLE_GREET[lang].test(aText) ? 4 : 0) + (ICHA[lang].test(aText) ? 4 : 0) + (mutual ? 6 : 0)
+    /* Prefer newest replies so stock feels like realtime reply news. */
+    + Math.max(0, 12 - Math.min(12, ageH));
   return {
     id: bId, kind: talkKind(aText + ' ' + bText, at), mutual, score: Math.round(score * 10) / 10,
     a: { handle: aHandle, text: aText, id: aId },
@@ -374,34 +389,37 @@ function humorPlay(stories) {
     night: ids(deal(nightMain, nightHome, 0.15, 2, true)),
   };
 }
-/* Public humor JSON: comment / reply text only. No real account names, handles, or profile URLs.
-   news-shorts still filters on a.handle / b.handle (goodStories), so we publish opaque handle "s0"/"s1"
-   (same indices as s) — never a real @name. */
+/* Public humor JSON: real @handles (registered public accounts — OK to show) and real X status URLs
+   so Reply News can open https://x.com/{handle}/status/{id}. Opaque s0/s1 leftovers are not rewritten
+   into fake X URLs. */
+const xStatusUrl = (handle, id) => {
+  const h = String(handle || '').replace(/^@+/, '');
+  const i = String(id || '');
+  if (!h || !i || isOpaqueHandle(h) || !/^\d+$/.test(i)) return '';
+  return `https://x.com/${h}/status/${i}`;
+};
 function publicStory(s) {
-  const speakers = new Map();
-  let n = 0;
-  const sid = h => {
-    const k = String(h || '').toLowerCase();
-    if (/^s\d+$/.test(k)) {
-      const i = Number(k.slice(1));
-      if (!speakers.has(k)) speakers.set(k, i);
-      if (i >= n) n = i + 1;
-      return speakers.get(k);
-    }
-    if (!speakers.has(k)) speakers.set(k, n++);
-    return speakers.get(k);
+  const side = p => {
+    const handle = String((p && p.handle) || '').replace(/^@+/, '');
+    const id = String((p && p.id) || '');
+    const out = { text: p.text, id, handle };
+    if (p && p.s != null) out.s = p.s;
+    const url = xStatusUrl(handle, id);
+    if (url) out.url = url;
+    return out;
   };
-  const sa = sid(s.a.handle != null ? s.a.handle : (s.a.s != null ? 's' + s.a.s : ''));
-  const sb = sid(s.b.handle != null ? s.b.handle : (s.b.s != null ? 's' + s.b.s : ''));
   const out = {
     id: s.id, kind: s.kind, mutual: !!s.mutual, score: s.score, at: s.at || '', found: s.found || '',
-    a: { text: s.a.text, id: s.a.id, s: sa, handle: 's' + sa },
-    b: { text: s.b.text, id: s.b.id, s: sb, handle: 's' + sb },
+    a: side(s.a), b: side(s.b),
   };
   if (Array.isArray(s.t) && s.t.length > 2) {
     out.t = s.t.map(m => {
-      const si = sid(m.h != null ? m.h : (m.s != null ? 's' + m.s : ''));
-      return { x: m.x, i: m.i, s: si, h: 's' + si };
+      const h = String(m.h != null ? m.h : (m.s != null ? 's' + m.s : '')).replace(/^@+/, '');
+      const item = { x: m.x, i: m.i, h };
+      if (m.s != null) item.s = m.s;
+      const url = xStatusUrl(h, m.i);
+      if (url) item.url = url;
+      return item;
     });
   }
   return out;
@@ -640,7 +658,10 @@ async function build(lang) {
   const droppedOrdinary = old.filter(s => s && s.b && s.b.text && !clearlyRomantic(replyOf(s), lang)).length;
   if (droppedOrdinary) console.log(`  ${lang}: dropped ${droppedOrdinary} old stories whose reply was not clearly romantic`);
   const fullStories = found.filter(s => !skipHandle(s.a.handle) && !skipHandle(s.b.handle) && registeredStory(s) && clearlyRomantic(replyOf(s), lang))
-    .concat(old.filter(keepOld).map(s => ({ ...s, kind: talkKind(pairText(s), s.at || s.found) }))).map(talk).slice(0, CONF.keep);
+    .concat(old.filter(keepOld).map(s => ({ ...s, kind: talkKind(pairText(s), s.at || s.found) }))).map(talk)
+    /* Newest first so stale loops lose to fresh romance from newly registered accounts. */
+    .sort((x, y) => (Date.parse(y.at || y.found || 0) || 0) - (Date.parse(x.at || x.found || 0) || 0))
+    .slice(0, CONF.keep);
   if (toRegister.size && CONF.memo && !CONF.dry) {
     const n = await addHumorAccounts(CONF.memo, lang, [...toRegister]);
     if (n) console.log(`  ${lang}: recorded ${n} reply partners into the private memo (names not printed)`);
@@ -649,8 +670,8 @@ async function build(lang) {
   fullStories.forEach(s => { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
   const play = humorPlay(fullStories);
   const stories = fullStories.map(publicStory);
-  console.log(`  ${lang}: ${count.timelines} timelines gave ${count.posts} answered posts; ${count.conversations} exchanges read whole (${count.otherWay} posts another way); ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)} (handles stripped for privacy).`);
-  return { version: 4, lang, updated: stamp(), privacy: 'text-only', run: off ? (before.run || null) : { at: stamp(), ...count }, kinds, conv, people: readAt, skip: Object.fromEntries(SKIP), play, stories };
+  console.log(`  ${lang}: ${count.timelines} timelines gave ${count.posts} answered posts; ${count.conversations} exchanges read whole (${count.otherWay} posts another way); ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)} (real @handles + X status URLs).`);
+  return { version: 5, lang, updated: stamp(), privacy: 'handles-ok', run: off ? (before.run || null) : { at: stamp(), ...count }, kinds, conv, people: readAt, skip: Object.fromEntries(SKIP), play, stories };
 }
 
 async function main() {

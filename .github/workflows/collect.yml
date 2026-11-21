@@ -11,7 +11,10 @@
 name: Collect
 # In the list of runs a run of the chain is named with a small graph of what the last 12 hours took in
 # (stats.mjs makes it, next.mjs passes it on), so the list itself shows whether the collection goes well.
-run-name: ${{ inputs.note || 'Collect' }}
+# repository_dispatch type "collect" mirrors workflow_dispatch inputs via client_payload
+# (only, rejudge, searches, chain, note, bootstrap). Used when the Cursor app token
+# can create repository_dispatch (204) but cannot workflow_dispatch (403).
+run-name: ${{ github.event.client_payload.note || inputs.note || 'Collect' }}
 on:
   schedule:
     - cron: '23 */3 * * *'   # only a safeguard: starts the chain again if it has stopped
@@ -41,6 +44,8 @@ on:
         description: 'Humor: add ~500 romantic-reply accounts per language (long find; use once)'
         type: boolean
         default: false
+  repository_dispatch:
+    types: [collect]
 permissions:
   contents: write
   actions: write
@@ -54,7 +59,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      CHAIN: ${{ (github.event_name == 'schedule' || inputs.chain) && '1' || '' }}
+      # Unify workflow_dispatch inputs and repository_dispatch client_payload.
+      CHAIN: ${{ (github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.client_payload.chain) || (github.event_name != 'repository_dispatch' && inputs.chain)) && '1' || '' }}
+      XAPI_ONLY: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.only || inputs.only || '' }}
+      XAPI_REJUDGE: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.rejudge || github.event_name != 'repository_dispatch' && inputs.rejudge || false }}
+      XAPI_SEARCHES: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.searches || inputs.searches || '' }}
+      XAPI_BOOTSTRAP: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.bootstrap || github.event_name != 'repository_dispatch' && inputs.bootstrap || false }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -110,10 +120,10 @@ jobs:
       # The earlier collection for Reply News (collect.mjs). It is switched off in config.json ("source": "off")
       # and runs only when a person starts a whole run by hand.
       - name: Collect
-        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.only && !inputs.chain }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch') && env.XAPI_ONLY == '' && env.CHAIN != '1' }}
         env:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-          XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
+          XAPI_NO_SEARCH: ${{ env.XAPI_REJUDGE == 'true' && '1' || '' }}
         run: node collect.mjs --out public
       # Humor: first record ~50 new clearly-romantic-reply accounts into humor-accounts.json (humor-find.mjs),
       # then read only those registered accounts' timelines/conversations (humor.mjs) for ~160 stories.
@@ -123,17 +133,17 @@ jobs:
       # MEMO_TOKEN, a fine-grained token that may read and write that repository's contents. Without the
       # secret nothing is remembered and an account list is not saved.
       - name: Humor accounts (about 50 new each run; or ~800/lang when bootstrap; aim ~2000 total)
-        if: ${{ !inputs.only || inputs.only == 'humor' }}
+        if: ${{ env.XAPI_ONLY == '' || env.XAPI_ONLY == 'humor' }}
         continue-on-error: true
         env:
-          XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
-        run: node humor-find.mjs ${{ inputs.bootstrap && '--bootstrap' || '' }}
+          XAPI_NO_SEARCH: ${{ env.XAPI_REJUDGE == 'true' && '1' || '' }}
+        run: node humor-find.mjs ${{ env.XAPI_BOOTSTRAP == 'true' && '--bootstrap' || '' }}
       - name: Humor stories
-        if: ${{ !inputs.only || inputs.only == 'humor' }}
+        if: ${{ env.XAPI_ONLY == '' || env.XAPI_ONLY == 'humor' }}
         continue-on-error: true
         env:
-          XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
-        run: node humor.mjs --out public ${{ inputs.bootstrap && '--minutes 28' || '' }}
+          XAPI_NO_SEARCH: ${{ env.XAPI_REJUDGE == 'true' && '1' || '' }}
+        run: node humor.mjs --out public ${{ env.XAPI_BOOTSTRAP == 'true' && '--minutes 28' || '' }}
       - name: Save the memo (the private repository)
         if: ${{ env.XAPI_MEMO_DIR != '' }}
         continue-on-error: true
@@ -156,7 +166,7 @@ jobs:
             echo "⚠️ 非公開リポジトリ ${MEMO_REPO} に保存できませんでした。MEMO_TOKEN に Contents の「Read and write」権限があるか確かめてください。" >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Publish the humor stories
-        if: ${{ !inputs.only || inputs.only == 'humor' }}
+        if: ${{ env.XAPI_ONLY == '' || env.XAPI_ONLY == 'humor' }}
         run: |
           cd public
           # Account lists are private. Never publish them, even if an older run left a file here.
@@ -173,21 +183,21 @@ jobs:
           rm -rf .git
       # Replies to accounts the owner sent (news.mjs). News accounts are not chosen here.
       - name: Replies to the news
-        if: ${{ !inputs.only || inputs.only == 'news' }}
+        if: ${{ env.XAPI_ONLY == '' || env.XAPI_ONLY == 'news' }}
         continue-on-error: true
         env:
-          XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
-        run: node news.mjs --out public ${{ inputs.searches && format('--searches {0}', inputs.searches) || '' }}
+          XAPI_NO_SEARCH: ${{ env.XAPI_REJUDGE == 'true' && '1' || '' }}
+        run: node news.mjs --out public ${{ env.XAPI_SEARCHES != '' && format('--searches {0}', env.XAPI_SEARCHES) || '' }}
       # News posts (people.mjs): private memo news-famous.json only. ~5 clips/account, stock toward ~2000.
       # When that file is missing, no news account is read. Names are not printed in logs.
       - name: News posts from registered accounts
-        if: ${{ !inputs.only || inputs.only == 'news' }}
+        if: ${{ env.XAPI_ONLY == '' || env.XAPI_ONLY == 'news' }}
         continue-on-error: true
         run: node people.mjs --out public
 
       # English headlines already collected: kept only when the account is in that same file.
       - name: English news
-        if: ${{ !inputs.only || inputs.only == 'news' }}
+        if: ${{ env.XAPI_ONLY == '' || env.XAPI_ONLY == 'news' }}
         continue-on-error: true
         run: node english.mjs --out public
       # news-read.json (who was read) is written by people.mjs into the memo. Save it here, after that

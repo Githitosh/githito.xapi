@@ -1,2 +1,6 @@
 public/
 node_modules/
+
+# Account lists stay in the private memo only (never commit handles)
+docs/memo/news-famous.json
+docs/memo/humor-accounts.json

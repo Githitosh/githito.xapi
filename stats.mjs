@@ -231,9 +231,10 @@ async function inventory() {
   const memo = process.env.XAPI_MEMO_DIR ? path.resolve(process.env.XAPI_MEMO_DIR) : '';
   const ha = memo ? await readJson(path.join(memo, 'humor-accounts.json'), {}) : {};
   const req = memo ? await readJson(path.join(memo, 'accounts.json'), {}) : {};
-  const famous = await readJson(path.join(HERE, 'docs', 'memo', 'news-famous.json'), {});
+  /* Counts only: handles stay in the private memo and are never written into stats or logs. */
+  const famous = memo ? await readJson(path.join(memo, 'news-famous.json'), {}) : {};
   const accounts = {
-    newsRegistered: (famous.ja || []).length + (famous.en || []).length,
+    newsRegistered: (Array.isArray(famous.ja) ? famous.ja.length : 0) + (Array.isArray(famous.en) ? famous.en.length : 0),
     humorRegistered: (Array.isArray(ha.ja) ? ha.ja.length : 0) + (Array.isArray(ha.en) ? ha.en.length : 0),
     newsRequests: Array.isArray(req.accounts) ? req.accounts.length : 0,
   };

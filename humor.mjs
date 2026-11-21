@@ -369,22 +369,35 @@ function humorPlay(stories) {
     night: ids(deal(nightMain, nightHome, 0.15, 2, true)),
   };
 }
-/* Public humor JSON: comment / reply text only. No account names, handles, or profile URLs. */
+/* Public humor JSON: comment / reply text only. No real account names, handles, or profile URLs.
+   news-shorts still filters on a.handle / b.handle (goodStories), so we publish opaque handle "s0"/"s1"
+   (same indices as s) — never a real @name. */
 function publicStory(s) {
   const speakers = new Map();
   let n = 0;
   const sid = h => {
     const k = String(h || '').toLowerCase();
+    if (/^s\d+$/.test(k)) {
+      const i = Number(k.slice(1));
+      if (!speakers.has(k)) speakers.set(k, i);
+      if (i >= n) n = i + 1;
+      return speakers.get(k);
+    }
     if (!speakers.has(k)) speakers.set(k, n++);
     return speakers.get(k);
   };
+  const sa = sid(s.a.handle != null ? s.a.handle : (s.a.s != null ? 's' + s.a.s : ''));
+  const sb = sid(s.b.handle != null ? s.b.handle : (s.b.s != null ? 's' + s.b.s : ''));
   const out = {
     id: s.id, kind: s.kind, mutual: !!s.mutual, score: s.score, at: s.at || '', found: s.found || '',
-    a: { text: s.a.text, id: s.a.id, s: sid(s.a.handle) },
-    b: { text: s.b.text, id: s.b.id, s: sid(s.b.handle) },
+    a: { text: s.a.text, id: s.a.id, s: sa, handle: 's' + sa },
+    b: { text: s.b.text, id: s.b.id, s: sb, handle: 's' + sb },
   };
   if (Array.isArray(s.t) && s.t.length > 2) {
-    out.t = s.t.map(m => ({ x: m.x, i: m.i, s: sid(m.h) }));
+    out.t = s.t.map(m => {
+      const si = sid(m.h != null ? m.h : (m.s != null ? 's' + m.s : ''));
+      return { x: m.x, i: m.i, s: si, h: 's' + si };
+    });
   }
   return out;
 }
@@ -553,8 +566,11 @@ async function build(lang) {
     const { t: _, ...rest } = s;
     return t.length > 2 ? { ...rest, t } : rest;
   };
-  /* Rejudge past stories too: drop ordinary replies that are not clearly romantic. */
-  const keepOld = ACC.missing ? () => false : s => fresh(s) && ok(s) && registeredStory(s) && !skipped(s.a && s.a.handle) && !skipped(s.b && s.b.handle);
+  /* Rejudge past stories too: drop ordinary replies that are not clearly romantic.
+     Memo briefly missing: keep fresh clearly-romantic text-only stories (do not empty Reply News). */
+  const keepOld = ACC.missing
+    ? s => fresh(s) && ok(s) && !!(s.a && s.a.text && s.b && s.b.text)
+    : s => fresh(s) && ok(s) && registeredStory(s) && !skipped(s.a && s.a.handle) && !skipped(s.b && s.b.handle);
   const droppedOrdinary = old.filter(s => s && s.b && s.b.text && !clearlyRomantic(replyOf(s), lang)).length;
   if (droppedOrdinary) console.log(`  ${lang}: dropped ${droppedOrdinary} old stories whose reply was not clearly romantic`);
   const fullStories = found.filter(s => !skipped(s.a.handle) && !skipped(s.b.handle) && registeredStory(s) && clearlyRomantic(replyOf(s), lang))

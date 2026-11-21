@@ -68,8 +68,8 @@ const LOVE = {
   en: /love you|love ya|luv u|\bily\b|cuddle|snuggle|miss you|my love|\bbabe\b|\bbaby\b|honey|sweetheart|cutie|good ?night|night night|good ?morning|sunshine|rise and shine|sleep tight|sweet dreams|❤|💕|🥰|😘/i,
 };
 const CUTE = {
-  ja: /おはようなの|おはよーだよ|おっはー|おはよん|おはよぉ|ねんね|だいしゅき|しゅき|ぎゅー|ちゅ|♡|❤|💕|🥰|😘/,
-  en: /night night|sunshine|rise and shine|love you more|miss you more|\bbabe\b|honey|xoxo|💕|🥰|😘/i,
+  ja: /おはよーなのだ|おはようなのだ|おはよ[〜～ー]+|おっはー|おはよん|おはよぉ|おはおは|おかえり(?:なさい)?|いってらっしゃい|行ってらっしゃい|いってきます|行ってきます|ただいま|ねんね|だいしゅき|しゅき|ぎゅー|ちゅ[ー〜っ]/,
+  en: /night night|sunshine|rise and shine|welcome home|home safe|love you more|miss you more|\bbabe\b|honey|xoxo/i,
 };
 const UNSAFE = /カニバ|浮気|不倫|別れ|離婚|死ね|殺|cheat|divorce|break ?up|hate you|🍑|🍆|🔞/i;
 const YOUTH = /学校|宿題|部活|受験|高校|中学|\bschool\b|\bhomework\b|\bteen\b/i;
@@ -96,10 +96,17 @@ const parentOf = st => {
 
 const HEART = /♡|❤|♥|💕|💗|💖|💘|💞|🥰|😘|😚|😍|🤗/;
 const FEELING = {
-  ja: /大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|愛してる|あいしてる|愛して|ぎゅ[ー〜っ]*|ちゅ[ー〜っ]*|なでなで|よしよし|会いたい|あいたい|いちゃ|しゅき/,
+  ja: /大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|愛してる|あいしてる|愛して|ぎゅ[ー〜っ]+|(?:^|[^ぁ-ん])ぎゅ(?:$|[^ぁ-ん])|ちゅ[ー〜っ]+|(?:^|[^ぁ-ん])ちゅ(?:$|[^ぁ-ん])|なでなで|よしよし|会いたい|あいたい|いちゃ|しゅき/,
   en: /i love you|love you|love ya|luv u|\bily\b|cuddle|snuggle|miss you|my love|\bbabe\b|honey|sweetheart|xoxo|night night|sunshine/i,
 };
-const clearlyRomantic = (text, lang) => !!(HEART.test(text) || FEELING[lang].test(text) || CUTE[lang].test(text));
+const clearlyRomantic = (text, lang) => {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (FEELING[lang].test(t) || CUTE[lang].test(t)) return true;
+  /* Heart alone only on short lines (ordinary long comments that sprinkle a heart stay out). */
+  if (HEART.test(t) && t.length <= (lang === 'en' ? 60 : 28)) return true;
+  return false;
+};
 function mayRegister(st, lang) {
   const h = handleOf(st);
   const text = postText(st);

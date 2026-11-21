@@ -389,34 +389,37 @@ function humorPlay(stories) {
     night: ids(deal(nightMain, nightHome, 0.15, 2, true)),
   };
 }
-/* Public humor JSON: comment / reply text only. No real account names, handles, or profile URLs.
-   news-shorts still filters on a.handle / b.handle (goodStories), so we publish opaque handle "s0"/"s1"
-   (same indices as s) — never a real @name. */
+/* Public humor JSON: real @handles (registered public accounts — OK to show) and real X status URLs
+   so Reply News can open https://x.com/{handle}/status/{id}. Opaque s0/s1 leftovers are not rewritten
+   into fake X URLs. */
+const xStatusUrl = (handle, id) => {
+  const h = String(handle || '').replace(/^@+/, '');
+  const i = String(id || '');
+  if (!h || !i || isOpaqueHandle(h) || !/^\d+$/.test(i)) return '';
+  return `https://x.com/${h}/status/${i}`;
+};
 function publicStory(s) {
-  const speakers = new Map();
-  let n = 0;
-  const sid = h => {
-    const k = String(h || '').toLowerCase();
-    if (/^s\d+$/.test(k)) {
-      const i = Number(k.slice(1));
-      if (!speakers.has(k)) speakers.set(k, i);
-      if (i >= n) n = i + 1;
-      return speakers.get(k);
-    }
-    if (!speakers.has(k)) speakers.set(k, n++);
-    return speakers.get(k);
+  const side = p => {
+    const handle = String((p && p.handle) || '').replace(/^@+/, '');
+    const id = String((p && p.id) || '');
+    const out = { text: p.text, id, handle };
+    if (p && p.s != null) out.s = p.s;
+    const url = xStatusUrl(handle, id);
+    if (url) out.url = url;
+    return out;
   };
-  const sa = sid(s.a.handle != null ? s.a.handle : (s.a.s != null ? 's' + s.a.s : ''));
-  const sb = sid(s.b.handle != null ? s.b.handle : (s.b.s != null ? 's' + s.b.s : ''));
   const out = {
     id: s.id, kind: s.kind, mutual: !!s.mutual, score: s.score, at: s.at || '', found: s.found || '',
-    a: { text: s.a.text, id: s.a.id, s: sa, handle: 's' + sa },
-    b: { text: s.b.text, id: s.b.id, s: sb, handle: 's' + sb },
+    a: side(s.a), b: side(s.b),
   };
   if (Array.isArray(s.t) && s.t.length > 2) {
     out.t = s.t.map(m => {
-      const si = sid(m.h != null ? m.h : (m.s != null ? 's' + m.s : ''));
-      return { x: m.x, i: m.i, s: si, h: 's' + si };
+      const h = String(m.h != null ? m.h : (m.s != null ? 's' + m.s : '')).replace(/^@+/, '');
+      const item = { x: m.x, i: m.i, h };
+      if (m.s != null) item.s = m.s;
+      const url = xStatusUrl(h, m.i);
+      if (url) item.url = url;
+      return item;
     });
   }
   return out;
@@ -667,8 +670,8 @@ async function build(lang) {
   fullStories.forEach(s => { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
   const play = humorPlay(fullStories);
   const stories = fullStories.map(publicStory);
-  console.log(`  ${lang}: ${count.timelines} timelines gave ${count.posts} answered posts; ${count.conversations} exchanges read whole (${count.otherWay} posts another way); ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)} (handles stripped for privacy).`);
-  return { version: 4, lang, updated: stamp(), privacy: 'text-only', run: off ? (before.run || null) : { at: stamp(), ...count }, kinds, conv, people: readAt, skip: Object.fromEntries(SKIP), play, stories };
+  console.log(`  ${lang}: ${count.timelines} timelines gave ${count.posts} answered posts; ${count.conversations} exchanges read whole (${count.otherWay} posts another way); ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)} (real @handles + X status URLs).`);
+  return { version: 5, lang, updated: stamp(), privacy: 'handles-ok', run: off ? (before.run || null) : { at: stamp(), ...count }, kinds, conv, people: readAt, skip: Object.fromEntries(SKIP), play, stories };
 }
 
 async function main() {

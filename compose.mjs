@@ -510,17 +510,29 @@ export function excerptOf(text) {
    neither. Null when a message may not play. */
 export function talkCards(s) {
   if (!s || !s.id || !s.a || !s.b) return null;
-  /* Speaker key: real handle when still present, else opaque index s from privacy-stripped stories. */
+  /* Speaker key: real @handle when present (preferred). Opaque s0/s1 only for legacy privacy-stripped rows. */
   const who = (m, side) => {
-    if (m && m.h) return String(m.h);
+    if (m && m.h) return String(m.h).replace(/^@+/, '');
     if (m && m.s != null) return 's' + m.s;
-    if (side && side.handle) return String(side.handle);
+    if (side && side.handle) return String(side.handle).replace(/^@+/, '');
     if (side && side.s != null) return 's' + side.s;
     return '';
   };
+  const statusUrl = (h, id, given) => {
+    if (given && /^https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[^/]+\/status\/\d+/i.test(String(given))) {
+      return String(given).replace(/[?#].*$/, '').replace(/\/\/(?:www\.)?twitter\.com\//i, '//x.com/');
+    }
+    const handle = String(h || '').replace(/^@+/, '');
+    const i = String(id || '');
+    if (!handle || !i || /^s\d+$/i.test(handle) || !/^\d+$/.test(i)) return '';
+    return `https://x.com/${handle}/status/${i}`;
+  };
   const msgs = Array.isArray(s.t) && s.t.length > 2
-    ? s.t.map(m => ({ h: who(m), x: m.x, i: m.i }))
-    : [{ h: who(null, s.a), x: s.a.text, i: s.a.id }, { h: who(null, s.b), x: s.b.text, i: s.b.id }];
+    ? s.t.map(m => ({ h: who(m), x: m.x, i: m.i, url: m.url }))
+    : [
+      { h: who(null, s.a), x: s.a.text, i: s.a.id, url: s.a.url },
+      { h: who(null, s.b), x: s.b.text, i: s.b.id, url: s.b.url },
+    ];
   const m = [];
   for (const [k, x] of msgs.entries()) {
     const full = tidyTalk(x.x);
@@ -529,8 +541,8 @@ export function talkCards(s) {
     /* A message too short to take a part from (な！) leaves the talk out: its first beat would be the whole. */
     const first = excerptOf(full);
     if (!first) return null;
-    /* Keep h only for packing/dedup inside stock.mjs; stock strips handles before publish. */
-    m.push({ i: String(x.i || ''), h: x.h, ...(k ? { to: msgs[k - 1].h } : {}), ja: [first, full] });
+    const url = statusUrl(x.h, x.i, x.url);
+    m.push({ i: String(x.i || ''), h: x.h, ...(url ? { url } : {}), ...(k ? { to: msgs[k - 1].h } : {}), ja: [first, full] });
   }
   if (m.length < 2 || !m[0].h || !m[1].h || m[0].h === m[1].h) return null;
   const all = m.map(x => x.ja[1]).join(' ');

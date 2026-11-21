@@ -43,13 +43,13 @@ const CONF = {
   on: FILE.on !== false,
   langs: (Array.isArray(FILE.langs) ? FILE.langs : ['ja']).filter(l => l === 'ja' || l === 'en'),
   out: path.resolve(opt('out', path.join(HERE, 'public'))),
-  timelines: num('timelines', 60), // registered accounts whose latest posts are read
-  conversations: num('conversations', 400), // exchanges read whole (a post, what came before it, the replies under it)
-  enough: num('enough', 100),    // a run stops asking once it has this many new stories
-  keep: num('keep', 1500),       // stories the file holds
-  hours: num('hours', 72),       // a story leaves the file after three days
+  timelines: num('timelines', 150), // registered accounts whose latest posts are read (raise toward ~2000 stock)
+  conversations: num('conversations', 600), // exchanges read whole (a post, what came before it, the replies under it)
+  enough: num('enough', 160),    // a run stops asking once it has this many new stories
+  keep: num('keep', 2500),       // stories the file holds (aim for ~2000 videos in stock)
+  hours: num('hours', 96),       // a story leaves the file after four days
   rest: num('rest', 240000),     // milliseconds a way in is left alone after it refuses (the others go on meanwhile)
-  minutes: num('minutes', 13),   // how long one run may last: a refusal passes in a quarter of an hour, so a run waits it out
+  minutes: num('minutes', 14),   // how long one run may last: a refusal passes in a quarter of an hour, so a run waits it out
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1',
   /* Private memo folder: humor-accounts.json (registration). Empty: no humor account is read. */
@@ -100,7 +100,9 @@ const POLITE = /さん|様|氏|先生|先輩|ございます|でした[。！!�
 /* Births and children are family news, not couple talk. */
 const FAMILY = /成人したら|成人する|うちの子|我が子|わが子|育児|子育て|保育園|幼稚園|出産|妊娠|赤ちゃん|男の子|女の子|息子|娘|子供|子ども|こども|孫|ママ友|パパ友/;
 /* Talk about works, streams and campaigns is not talk between a couple; "ALT" is a picture's caption. */
-const FAN = /拡散|リポスト|\bRT\b|フォロー|イラスト|作品|配信|推し|\bALT\b|当選|企画|プレゼント|お迎え|納品|ご依頼|スペース|リスナー|ライブ|チケット|グッズ|新曲|アルバム|\bMV\b|動画|投稿|写真集|てぇてぇ|てえてえ|尊[いすみ]|メンバー|キャプテン|センター|ペア|コンビ|絵柄|色味|描い|塗り|立ち絵|衣装|アバター|スキン|選びました|シーン|リスペクト|曲|歌っ|歌う|ゲーム|ガチャ|イベント|タグ|呼びタメ|タメ口|タメで|お言葉に甘え|尊い|\bFGO\b|とうらぶ|くっつ[くけ]|みんな|皆|ポスト|写真|解禁|戦型|対戦|勝[っちて]|かてた|負け|ランク|甘えてしま|デビュー/;
+/* Fan / work talk is not couple talk. Underground-idol news coverage is also out (idols as private
+   people in a couple exchange may pass; cheki / tokuten / oshi-news language does not). */
+const FAN = /拡散|リポスト|\bRT\b|フォロー|イラスト|作品|配信|推し|\bALT\b|当選|企画|プレゼント|お迎え|納品|ご依頼|スペース|リスナー|ライブ|チケット|グッズ|新曲|アルバム|\bMV\b|動画|投稿|写真集|てぇてぇ|てえてえ|尊[いすみ]|メンバー|キャプテン|センター|ペア|コンビ|絵柄|色味|描い|塗り|立ち絵|衣装|アバター|スキン|選びました|シーン|リスペクト|曲|歌っ|歌う|ゲーム|ガチャ|イベント|タグ|呼びタメ|タメ口|タメで|お言葉に甘え|尊い|\bFGO\b|とうらぶ|くっつ[くけ]|みんな|皆|ポスト|写真|解禁|戦型|対戦|勝[っちて]|かてた|負け|ランク|甘えてしま|デビュー|地下アイドル|地下ドル|チェキ|特典会|物販|握手会|リリイベ|生誕祭|対バン|アイドル活動/;
 /* Nothing of the body on this page. */
 const BODY = /ベッ[ドト]|添い寝|お風呂|風呂|脱[がぎぐい]|裸|舐|胸|尻|下着|えっち|エッチ|エロ|ホテル|お泊|泊ま|濡れ|お口|唇|くちびる|ばぶ|おっぱ|乙π|π|デカすぎ|でかすぎ|巨乳|貧乳|谷間|太もも|ふともも|パンツ|🍌|🍒|💦|🍑|🍆|🤱|👄|😛|🤤|🍼|👶/u;
 const squash = text => String(text || '').toLowerCase().replace(/[\s　"'“”‘’「」『』（）()\[\]【】、。，．,.!?！？…・:：;；\-–—~〜ｗw]+/g, '');
@@ -231,8 +233,24 @@ async function parentOtherWay(handle, id) {
 const whenOf = st => { const t = st && (st.created_timestamp ? st.created_timestamp * 1000 : Date.parse(st.created_at || '')); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString().replace(/\.\d+Z$/, 'Z') : ''; };
 /* ---------- pairs ---------- */
 const replyScore = (text, lang) => (charLen(text) <= SHORT[lang] ? 4 : 0) + (CUTE[lang].test(text) ? 5 : 0) + (ICHA[lang].test(text) ? 6 : 0) + (PLAIN[lang].test(text) ? -5 : 0) + Math.random() * 3;
-/* A post and the reply to it, when both may play: two different people, neither famous, the reply a
-   loving one, and the post loving, short, or itself an answer to the same person. */
+/* Clearly romantic replies only: heart / affection emoji, clear love words, or a funny romantic
+   greeting form (おはよん♡, night night babe). Ordinary replies on a romance thread (うん, そうだね,
+   plain おはよう / thanks with no feeling) are dropped — they are not interesting here. */
+const HEART = /♡|❤|♥|💕|💗|💖|💘|💞|🥰|😘|😚|😍|🤗/;
+const FEELING = {
+  ja: /大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|愛してる|あいしてる|愛して|ぎゅ[ー〜っ]*|ちゅ[ー〜っ]*|なでなで|よしよし|会いたい|あいたい|いちゃ|イチャ|くっつ[きいこ]|甘え|しゅき|ずっと一緒|一生離さない/,
+  en: /i love you|love you (?:so much|more|forever)|love ya|luv u|\bily\b|cuddle|snuggle|miss you(?: more)?|my love|\bbabe\b|\bbaby\b|honey|sweetheart|cutie|xoxo|night night|nighty|sunshine|rise and shine|sleep tight|sweet dreams/i,
+};
+export function clearlyRomantic(text, lang) {
+  const t = String(text || '');
+  if (!t) return false;
+  if (HEART.test(t) || FEELING[lang].test(t)) return true;
+  /* Cute romantic greeting forms already encode loving playfulness; plain greetings do not. */
+  if (CUTE[lang].test(t)) return true;
+  return false;
+}
+/* A post and the reply to it, when both may play: two different people, neither famous, the reply
+   clearly romantic, and the post loving, short, or itself an answer to the same person. */
 /* Why pairs were not kept, counted for the run's log. */
 const WHY = {};
 const why = reason => { WHY[reason] = (WHY[reason] || 0) + 1; return null; };
@@ -248,17 +266,17 @@ function pairFrom(pst, cst, lang) {
   if (harsh(aText) || harsh(bText)) return why('unkind or critical words');
   if (alcohol(aText) || alcohol(bText) || tobacco(aText) || tobacco(bText)) return why('alcohol or smoking');
   if (followers(pst) > 20000 || followers(cst) > 20000) return why('famous');
-  if (!LOVE[lang].test(bText)) return why('the reply is not loving');
-  if (!(WORDS[lang].test(bText) || WORDS[lang].test(aText))) return why('a heart but no words');
+  if (!clearlyRomantic(bText, lang)) return why('reply not clearly romantic');
+  if (!(WORDS[lang].test(bText) || HEART.test(bText))) return why('reply has no romantic words');
   const mutual = parentOf(pst).who.toLowerCase() === bHandle.toLowerCase();
   if (!LOVE[lang].test(aText) && !mutual && charLen(aText) > (lang === 'en' ? 40 : 16)) return why('the post is about something else');
-  if (PLAIN[lang].test(aText) && PLAIN[lang].test(bText)) return why('two plain greetings');
+  if (PLAIN[lang].test(aText) && PLAIN[lang].test(bText) && !HEART.test(aText + bText) && !CUTE[lang].test(bText)) return why('two plain greetings');
   const score = replyScore(bText, lang) + (CUTE[lang].test(aText) ? 4 : 0) + (ICHA[lang].test(aText) ? 4 : 0) + (mutual ? 6 : 0);
   const at = whenOf(cst) || whenOf(pst);
   return {
     id: bId, kind: talkKind(aText + ' ' + bText, at), mutual, score: Math.round(score * 10) / 10,
-    a: { handle: aHandle, text: aText, url: pst.url || `https://x.com/${aHandle}/status/${aId}`, id: aId },
-    b: { handle: bHandle, text: bText, url: cst.url || `https://x.com/${bHandle}/status/${bId}`, id: bId },
+    a: { handle: aHandle, text: aText, id: aId },
+    b: { handle: bHandle, text: bText, id: bId },
     at, found: stamp(),
   };
 }
@@ -318,20 +336,57 @@ function pairsIn(list, lang) {
 
 /* ---------- the order the page plays in ---------- */
 /* Chosen here, at random, after every collection (see pick.mjs); the page plays from the top and leaves
-   out what its reader has seen. Three orders, for the hour of the day:
-   - morning: seven good mornings in ten, three loving exchanges;
-   - day: seven loving exchanges in ten, three greetings of coming home;
-   - night: seven loving exchanges in ten, three good nights or welcome homes.
-   Nobody comes twice in any stretch of ten stories. */
+   out what its reader has seen. Three orders, matched to the current time band so romance replies feel
+   like realtime reply news for that part of the day (prefer posts written in the same Japan-time slot):
+   - morning (4–11): mostly morning greetings from morning hours, then loving exchanges;
+   - day: mostly love / icha / miss from daytime, then homecoming;
+   - night (21–4): night / miss and love from night hours, then homecoming.
+   About eight or nine of ten slots match the band. Nobody comes twice in any stretch of eight stories. */
 function humorPlay(stories) {
-  const people = s => ['p' + String(s.a.handle).toLowerCase(), 'p' + String(s.b.handle).toLowerCase()];
-  const order = list => spread(lean(list, s => s.found || s.at, 24), people, 10);
+  const personKey = (side, fallback) => {
+    if (side && side.handle) return 'p' + String(side.handle).toLowerCase();
+    if (side && side.s != null) return 's' + side.s + ':' + (side.id || fallback || '');
+    if (side && side.id) return 'id' + side.id;
+    return 'x' + (fallback || Math.random());
+  };
+  const people = s => [personKey(s.a, s.id), personKey(s.b, s.id)];
+  const order = list => spread(lean(list, s => s.found || s.at, 12), people, 8);
   const ids = list => list.map(s => s.id);
-  const loving = order(stories.filter(s => s.kind === 'icha' || s.kind === 'love' || s.kind === 'miss'));
-  const mornings = order(stories.filter(s => s.kind === 'morning'));
-  const homes = order(stories.filter(s => s.kind === 'home' || s.kind === 'other'));
-  const nights = order(stories.filter(s => s.kind === 'night' || s.kind === 'home' || s.kind === 'other'));
-  return { made: stamp(), morning: ids(deal(mornings, loving, 0.3, 2, true)), day: ids(deal(loving, homes, 0.3, 2, true)), night: ids(deal(loving, nights, 0.3, 2, true)) };
+  const slotOk = (s, slot) => { const h = japanHour(s.at || s.found); return h < 0 || daySlot(h) === slot; };
+  const pick = (kinds, slot) => order(stories.filter(s => kinds.includes(s.kind) && slotOk(s, slot)));
+  const morningMain = pick(['morning'], 'morning');
+  const morningFill = pick(['love', 'icha', 'miss'], 'morning');
+  const dayMain = pick(['icha', 'love', 'miss'], 'day');
+  const dayHome = pick(['home'], 'day');
+  const nightFeel = pick(['night', 'miss'], 'night');
+  const nightLove = pick(['icha', 'love'], 'night');
+  const nightMain = nightFeel.length >= 3 ? deal(nightFeel, nightLove, 0.35, 0, true) : deal(nightLove, nightFeel, 0.2, 1, true);
+  const nightHome = pick(['home'], 'night');
+  return {
+    made: stamp(),
+    morning: ids(deal(morningMain.length ? morningMain : morningFill, morningFill, 0.15, 1, true)),
+    day: ids(deal(dayMain, dayHome, 0.2, 2, true)),
+    night: ids(deal(nightMain, nightHome, 0.15, 2, true)),
+  };
+}
+/* Public humor JSON: comment / reply text only. No account names, handles, or profile URLs. */
+function publicStory(s) {
+  const speakers = new Map();
+  let n = 0;
+  const sid = h => {
+    const k = String(h || '').toLowerCase();
+    if (!speakers.has(k)) speakers.set(k, n++);
+    return speakers.get(k);
+  };
+  const out = {
+    id: s.id, kind: s.kind, mutual: !!s.mutual, score: s.score, at: s.at || '', found: s.found || '',
+    a: { text: s.a.text, id: s.a.id, s: sid(s.a.handle) },
+    b: { text: s.b.text, id: s.b.id, s: sid(s.b.handle) },
+  };
+  if (Array.isArray(s.t) && s.t.length > 2) {
+    out.t = s.t.map(m => ({ x: m.x, i: m.i, s: sid(m.h) }));
+  }
+  return out;
 }
 
 /* ---------- one language ---------- */
@@ -347,7 +402,7 @@ async function build(lang) {
   Object.entries((before.skip && typeof before.skip === 'object') ? before.skip : {}).forEach(([h, at]) => { if (Date.now() - Date.parse(at || 0) < 14 * 24 * 3600e3) SKIP.set(h, at); });
   const perPerson = new Map();
   const perRun = new Map();
-  old.forEach(s => [s.a.handle, s.b.handle].forEach(h => { const k = String(h).toLowerCase(); perPerson.set(k, (perPerson.get(k) || 0) + 1); }));
+  old.forEach(s => [s.a && s.a.handle, s.b && s.b.handle].forEach(h => { if (!h) return; const k = String(h).toLowerCase(); perPerson.set(k, (perPerson.get(k) || 0) + 1); }));
   const off = CONF.noSearch;
 
   const ACC = await humorAccounts(CONF.memo);
@@ -356,6 +411,7 @@ async function build(lang) {
   if (ACC.missing) console.log(`  ${lang}: no humor-accounts.json: no humor account is read`);
   else console.log(`  ${lang}: ${registered.length} humor accounts from the private memo`);
   if (!CONF.memo) console.log(`  ${lang}: no private folder for the memo (--memo)`);
+  /* Align on private humor-accounts.json only; never leave legacy humor-memo-*.json in the public out. */
   if (!CONF.dry) await rm(path.join(CONF.out, 'v1', `humor-memo-${lang}.json`), { force: true });
 
   const readAt = {};
@@ -379,7 +435,8 @@ async function build(lang) {
     const ak = squash(pair.a.text).slice(0, 50), bk = squash(pair.b.text).slice(0, 50);
     if (have.has(pair.id) || texts.has(ak) || texts.has(bk)) { why('already in the file'); return false; }
     const who = [pair.a.handle, pair.b.handle].map(h => String(h).toLowerCase());
-    if (!who.some(h => allow.has(h))) { why('not a registered account'); return false; }
+    /* Both speakers must be registered: videos are from the memo list only. */
+    if (!who.every(h => allow.has(h))) { why('not a registered account'); return false; }
     if (who.some(h => skipped(h) || (perPerson.get(h) || 0) >= 4 || (perRun.get(h) || 0) >= 2)) { why('that person has enough stories'); return false; }
     who.forEach(h => { perPerson.set(h, (perPerson.get(h) || 0) + 1); perRun.set(h, (perRun.get(h) || 0) + 1); });
     have.add(pair.id);
@@ -475,10 +532,16 @@ async function build(lang) {
 
   const fresh = s => Date.now() - Date.parse(s.found || 0) < CONF.hours * 3600e3;
   const pairText = s => s.a.text + ' ' + s.b.text;
-  const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && !harsh(pairText(s)) && !alcohol(pairText(s)) && !tobacco(pairText(s)) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !AGE.test(s.a.text) && !AGE.test(s.b.text) && !EMOJI_HINT.test(pairText(s))
+  const replyOf = s => String((s && s.b && s.b.text) || '');
+  const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && clearlyRomantic(replyOf(s), lang) && !harsh(pairText(s)) && !alcohol(pairText(s)) && !tobacco(pairText(s)) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !AGE.test(s.a.text) && !AGE.test(s.b.text) && !EMOJI_HINT.test(pairText(s))
     && !FAN.test(pairText(s)) && !BODY.test(pairText(s)) && !FAMILY.test(pairText(s)) && (lang === 'en' || (!POLITE.test(s.a.text) && !POLITE.test(s.b.text)));
-  /* Both speakers must be on humor-accounts.json: videos show only registered accounts' words. */
-  const registeredStory = s => allow.has(String(s.a.handle).toLowerCase()) && allow.has(String(s.b.handle).toLowerCase());
+  /* Both speakers must be on humor-accounts.json when handles are still present. Text-only (v4) stories
+     already passed that check when written; rejudge them for romance / bans only. */
+  const registeredStory = s => {
+    const ah = s.a && s.a.handle, bh = s.b && s.b.handle;
+    if (ah || bh) return !!(ah && bh && allow.has(String(ah).toLowerCase()) && allow.has(String(bh).toLowerCase()));
+    return !!(s.a && s.a.text && s.b && s.b.text);
+  };
   const fine = x => cleanText(x) && !slander(x) && !alcohol(x) && !tobacco(x) && !UNSAFE_ROMANCE.test(x) && !YOUTH.test(x) && !AGE.test(x) && !EMOJI_HINT.test(x) && !FAN.test(x) && !BODY.test(x) && !FAMILY.test(x) && (lang === 'en' || !POLITE.test(x));
   const talk = s => {
     if (!Array.isArray(s.t)) return s;
@@ -490,13 +553,18 @@ async function build(lang) {
     const { t: _, ...rest } = s;
     return t.length > 2 ? { ...rest, t } : rest;
   };
-  const keepOld = ACC.missing ? () => false : s => fresh(s) && ok(s) && registeredStory(s) && !skipped(s.a.handle) && !skipped(s.b.handle);
-  const stories = found.filter(s => !skipped(s.a.handle) && !skipped(s.b.handle) && registeredStory(s))
+  /* Rejudge past stories too: drop ordinary replies that are not clearly romantic. */
+  const keepOld = ACC.missing ? () => false : s => fresh(s) && ok(s) && registeredStory(s) && !skipped(s.a && s.a.handle) && !skipped(s.b && s.b.handle);
+  const droppedOrdinary = old.filter(s => s && s.b && s.b.text && !clearlyRomantic(replyOf(s), lang)).length;
+  if (droppedOrdinary) console.log(`  ${lang}: dropped ${droppedOrdinary} old stories whose reply was not clearly romantic`);
+  const fullStories = found.filter(s => !skipped(s.a.handle) && !skipped(s.b.handle) && registeredStory(s) && clearlyRomantic(replyOf(s), lang))
     .concat(old.filter(keepOld).map(s => ({ ...s, kind: talkKind(pairText(s), s.at || s.found) }))).map(talk).slice(0, CONF.keep);
   const kinds = {};
-  stories.forEach(s => { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
-  console.log(`  ${lang}: ${count.timelines} timelines gave ${count.posts} answered posts; ${count.conversations} exchanges read whole (${count.otherWay} posts another way); ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)}.`);
-  return { version: 3, lang, updated: stamp(), run: off ? (before.run || null) : { at: stamp(), ...count }, kinds, conv, people: readAt, skip: Object.fromEntries(SKIP), play: humorPlay(stories), stories };
+  fullStories.forEach(s => { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
+  const play = humorPlay(fullStories);
+  const stories = fullStories.map(publicStory);
+  console.log(`  ${lang}: ${count.timelines} timelines gave ${count.posts} answered posts; ${count.conversations} exchanges read whole (${count.otherWay} posts another way); ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)} (handles stripped for privacy).`);
+  return { version: 4, lang, updated: stamp(), privacy: 'text-only', run: off ? (before.run || null) : { at: stamp(), ...count }, kinds, conv, people: readAt, skip: Object.fromEntries(SKIP), play, stories };
 }
 
 async function main() {

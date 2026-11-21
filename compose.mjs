@@ -510,7 +510,17 @@ export function excerptOf(text) {
    neither. Null when a message may not play. */
 export function talkCards(s) {
   if (!s || !s.id || !s.a || !s.b) return null;
-  const msgs = Array.isArray(s.t) && s.t.length > 2 ? s.t.map(m => ({ h: m.h, x: m.x, i: m.i })) : [{ h: s.a.handle, x: s.a.text, i: s.a.id }, { h: s.b.handle, x: s.b.text, i: s.b.id }];
+  /* Speaker key: real handle when still present, else opaque index s from privacy-stripped stories. */
+  const who = (m, side) => {
+    if (m && m.h) return String(m.h);
+    if (m && m.s != null) return 's' + m.s;
+    if (side && side.handle) return String(side.handle);
+    if (side && side.s != null) return 's' + side.s;
+    return '';
+  };
+  const msgs = Array.isArray(s.t) && s.t.length > 2
+    ? s.t.map(m => ({ h: who(m), x: m.x, i: m.i }))
+    : [{ h: who(null, s.a), x: s.a.text, i: s.a.id }, { h: who(null, s.b), x: s.b.text, i: s.b.id }];
   const m = [];
   for (const [k, x] of msgs.entries()) {
     const full = tidyTalk(x.x);
@@ -519,9 +529,10 @@ export function talkCards(s) {
     /* A message too short to take a part from (な！) leaves the talk out: its first beat would be the whole. */
     const first = excerptOf(full);
     if (!first) return null;
+    /* Keep h only for packing/dedup inside stock.mjs; stock strips handles before publish. */
     m.push({ i: String(x.i || ''), h: x.h, ...(k ? { to: msgs[k - 1].h } : {}), ja: [first, full] });
   }
-  if (m.length < 2 || m[0].h === m[1].h) return null;
+  if (m.length < 2 || !m[0].h || !m[1].h || m[0].h === m[1].h) return null;
   const all = m.map(x => x.ja[1]).join(' ');
   const greet = GREET.test(all), love = LOVE.test(all);
   return { i: String(s.id), k: s.kind || '', at: s.at || s.found || '', s: Number(s.score) || 0, gl: greet && love ? 2 : greet || love ? 1 : 0, m };

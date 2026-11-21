@@ -30,10 +30,10 @@ const num = (name, d) => { const v = Number(opt(name, FILE[name])); return Numbe
 const BOOT = flag('bootstrap');
 const CONF = {
   langs: (Array.isArray(FILE.langs) ? FILE.langs : ['ja', 'en']).filter(l => l === 'ja' || l === 'en'),
-  /* Bootstrap once: aim for hundreds of new accounts per language (CLI --find overrides). */
-  find: args.includes('--find') ? num('find', 20) : (BOOT ? 500 : Math.min(40, num('find', 20))),
-  findSearches: BOOT ? Math.max(num('findSearches', 28), 60) : num('findSearches', 28),
-  findTimelines: BOOT ? Math.max(num('findTimelines', 40), 120) : num('findTimelines', 40),
+  /* Bootstrap once: aim toward ~2000 registered accounts (CLI --find overrides). Half-hour runs add ~50/lang. */
+  find: args.includes('--find') ? num('find', 50) : (BOOT ? 800 : Math.min(80, num('find', 50))),
+  findSearches: BOOT ? Math.max(num('findSearches', 40), 80) : num('findSearches', 40),
+  findTimelines: BOOT ? Math.max(num('findTimelines', 100), 160) : num('findTimelines', 100),
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1',
   memo: opt('memo', process.env.XAPI_MEMO_DIR || '') ? path.resolve(opt('memo', process.env.XAPI_MEMO_DIR || '')) : '',
@@ -73,7 +73,15 @@ const CUTE = {
 };
 const UNSAFE = /カニバ|浮気|不倫|別れ|離婚|死ね|殺|cheat|divorce|break ?up|hate you|🍑|🍆|🔞/i;
 const YOUTH = /学校|宿題|部活|受験|高校|中学|\bschool\b|\bhomework\b|\bteen\b/i;
-const NOT_A_PERSON = /公式|official|ニュース|news|\bbot\b|shop|store|店|占い|VTuber|アイドル/i;
+/* Officials / shops / bots out. Idols as private people are OK; underground-idol news coverage is not. */
+const NOT_A_PERSON = /公式|official|ニュース|news|\bbot\b|shop|store|店|占い|VTuber|事務所所属|所属事務所/i;
+/* Couple / romance-forward signals (prefer these when growing toward ~2000). */
+const COUPLE = {
+  ja: /彼氏|彼女|旦那|嫁|夫|妻|恋人|カップル|交際|付き合|両想い|いちゃいちゃ|ぎゅー|ちゅー|おやすみ.*好き|好き.*おやす|ただいま.*好き|おかえり.*好き/,
+  en: /boyfriend|girlfriend|husband|wife|fiancé|fiance|my love|\bbabe\b|partner|couple|dating you/i,
+};
+/* Underground-idol / otaku-news skew: allowed in small mix, heavily down-ranked so the page stays couple-first. */
+const IDOL_NEWS = /地下アイドル|地下ドル|ライバー|コンカフェ|メンエス|チェキ|特典会|物販|握手会|推し|オタ|現場|リリイベ|リリースイベ|生誕祭|対バン|アイドル活動|地下生|読モ|グラドル|メンヘラ|#idol|fanclub|fancam/i;
 const HANDLE = /^[A-Za-z0-9_]{1,15}$/;
 
 const postText = st => String((st && st.text) || '').replace(/https?:\/\/\S+/g, ' ').replace(/@\w+/g, ' ').replace(/[#＃]\S+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -86,6 +94,12 @@ const parentOf = st => {
   return { id: /^\d+$/.test(String(id)) ? String(id) : '' };
 };
 
+const HEART = /♡|❤|♥|💕|💗|💖|💘|💞|🥰|😘|😚|😍|🤗/;
+const FEELING = {
+  ja: /大好き|だいすき|だいしゅき|すきすき|好きだよ|すきだよ|愛してる|あいしてる|愛して|ぎゅ[ー〜っ]*|ちゅ[ー〜っ]*|なでなで|よしよし|会いたい|あいたい|いちゃ|しゅき/,
+  en: /i love you|love you|love ya|luv u|\bily\b|cuddle|snuggle|miss you|my love|\bbabe\b|honey|sweetheart|xoxo|night night|sunshine/i,
+};
+const clearlyRomantic = (text, lang) => !!(HEART.test(text) || FEELING[lang].test(text) || CUTE[lang].test(text));
 function mayRegister(st, lang) {
   const h = handleOf(st);
   const text = postText(st);
@@ -94,13 +108,20 @@ function mayRegister(st, lang) {
   if (!HANDLE.test(h) || !text) return null;
   if (UNSAFE.test(text) || YOUTH.test(text) || NOT_A_PERSON.test(bio) || NOT_A_PERSON.test(text) || harsh(text)) return null;
   if (followers(st) > 20000 || a.protected) return null;
-  if (!LOVE[lang].test(text)) return null;
+  /* Only clearly romantic replies / funny romantic greetings — not ordinary comments. */
+  if (!clearlyRomantic(text, lang)) return null;
   if (!(parentOf(st).id || /^(?:@\w+\s+)/.test(String(st.text || '')))) {
     /* Prefer replies; a loving greeting post may still be worth coming back to. */
     if (!CUTE[lang].test(text) && text.length > (lang === 'en' ? 80 : 40)) return null;
   }
-  const score = (CUTE[lang].test(text) ? 5 : 0) + (LOVE[lang].test(text) ? 3 : 0) + (text.length <= (lang === 'en' ? 60 : 24) ? 2 : 0);
-  return { h, score };
+  const idolish = IDOL_NEWS.test(text) || IDOL_NEWS.test(bio);
+  /* Couple dynamics first. Idols OK in moderation; underground-idol news coverage is down-ranked hard. */
+  let score = (CUTE[lang].test(text) ? 5 : 0) + (FEELING[lang].test(text) ? 4 : 0) + (HEART.test(text) ? 3 : 0)
+    + (COUPLE[lang].test(text) || COUPLE[lang].test(bio) ? 8 : 0)
+    + (text.length <= (lang === 'en' ? 60 : 24) ? 2 : 0)
+    + (idolish ? -12 : 0);
+  if (score < 1) return null;
+  return { h, score, idolish: !!idolish };
 }
 
 class Refused extends Error {}
@@ -186,8 +207,18 @@ async function findFor(lang, have) {
     await sleep(900);
   }
 
-  const picked = [...found.values()].sort((a, b) => b.score - a.score).slice(0, CONF.find).map(x => x.h);
-  return { picked, searches, timelines, conversations, searchRefused };
+  /* Balanced pick: couple/romance-forward first; cap underground-idol-ish accounts so the mix does not skew. */
+  const ranked = [...found.values()].sort((a, b) => b.score - a.score);
+  const idolCap = Math.max(2, Math.floor(CONF.find * 0.15));
+  const picked = [];
+  let idols = 0;
+  for (const x of ranked) {
+    if (picked.length >= CONF.find) break;
+    if (x.idolish && idols >= idolCap) continue;
+    if (x.idolish) idols++;
+    picked.push(x.h);
+  }
+  return { picked, searches, timelines, conversations, searchRefused, idolish: idols };
 }
 
 async function main() {
@@ -202,8 +233,8 @@ async function main() {
   for (const lang of CONF.langs) {
     const have = new Set((ACC[lang] || []).map(e => e.h.toLowerCase()));
     console.log(`Humor find, ${lang}: looking for about ${CONF.find} new romantic-reply accounts`);
-    const { picked, searches, timelines, conversations, searchRefused } = await findFor(lang, have);
-    console.log(`  ${lang}: search ${searches} (refused ${searchRefused}), timelines ${timelines}, conversations ${conversations}; ${picked.length} new accounts ready`);
+    const { picked, searches, timelines, conversations, searchRefused, idolish } = await findFor(lang, have);
+    console.log(`  ${lang}: search ${searches} (refused ${searchRefused}), timelines ${timelines}, conversations ${conversations}; ${picked.length} new accounts ready (couple-first; idol-leaning among them: ${idolish || 0})`);
     if (!picked.length) continue;
     if (CONF.dry) { console.log(`  ${lang}: dry run, not writing`); continue; }
     const n = await addHumorAccounts(CONF.memo, lang, picked);

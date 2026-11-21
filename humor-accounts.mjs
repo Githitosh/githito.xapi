@@ -24,9 +24,29 @@ function normalize(data) {
 export async function humorAccounts(memoDir) {
   const empty = { version: 1, note: '', ja: [], en: [], handles: new Set(), missing: true };
   if (!memoDir) return empty;
+  const dir = path.resolve(memoDir);
+  const file = path.join(dir, 'humor-accounts.json');
   let text;
-  try { text = await readFile(path.join(path.resolve(memoDir), 'humor-accounts.json'), 'utf8'); }
-  catch (e) { return empty; }
+  try { text = await readFile(file, 'utf8'); }
+  catch (e) {
+    /* Legacy name (per-language public leftovers): merge once into humor-accounts.json if present. */
+    try {
+      const ja = JSON.parse(await readFile(path.join(dir, 'humor-memo-ja.json'), 'utf8'));
+      const en = JSON.parse(await readFile(path.join(dir, 'humor-memo-en.json'), 'utf8'));
+      const data = {
+        version: 1,
+        note: 'Humor only. Migrated from humor-memo-*.json; use humor-accounts.json only.',
+        ja: Array.isArray(ja) ? ja : (ja && ja.ja) || [],
+        en: Array.isArray(en) ? en : (en && en.en) || [],
+      };
+      const cur = normalize(data);
+      if (cur.ja.length || cur.en.length) {
+        await saveHumorAccounts(dir, cur);
+        return humorAccounts(dir);
+      }
+    } catch (e2) {}
+    return empty;
+  }
   let data;
   try { data = JSON.parse(text); } catch (e) { return empty; }
   return normalize(data);

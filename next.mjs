@@ -1,56 +1,23 @@
 #!/usr/bin/env node
-/* githito.xapi: the end of a run starts the next one, so the collection goes on by itself, for ever,
-   one run every half hour ("cycle" in config.json, in minutes).
+/* githito.xapi: half-hour Collect self-chain helper.
 
-   GitHub's own schedule starts runs hours late or not at all, so a run does not count on it:
-   - "loop": false in config.json ends the chain here;
-   - when another run is already waiting (somebody started one by hand), nothing is started: that run
-     comes next and carries the chain on;
-   - a run of the chain waits until the cycle's time has passed since it began, then starts the next
-     (while it waits it gives way at once to a run started by hand);
-   - a run started by hand starts the next one at once, since the chain gave way to it.
-   Run by the workflow as its last step; it needs GITHUB_TOKEN, GITHUB_REPOSITORY and GITHUB_RUN_ID. */
+   Chaining is DISABLED. The workflow no longer calls this file. If it is run anyway,
+   it does not dispatch another Collect (no workflow_dispatch). config.json "loop" is
+   false as a second guard. Do not add repository_dispatch or other alternate triggers. */
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const { GITHUB_TOKEN: token, GITHUB_REPOSITORY: repo, GITHUB_RUN_ID: runId } = process.env;
-const chain = process.env.CHAIN === '1';
-const started = Number(process.env.STARTED) || Math.floor(Date.now() / 1000);
-const api = (url, init) => fetch('https://api.github.com/repos/' + repo + url, { ...init, headers: { authorization: 'Bearer ' + token, accept: 'application/vnd.github+json', 'user-agent': 'githito.xapi collector', ...(init && init.headers) } });
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function waiting() {
-  const res = await api('/actions/workflows/collect.yml/runs?per_page=20');
-  if (!res.ok) throw new Error('the list of runs: HTTP ' + res.status);
-  const runs = (await res.json()).workflow_runs || [];
-  return runs.filter(r => String(r.id) !== String(runId) && ['pending', 'queued', 'requested', 'waiting'].includes(r.status)).length;
-}
 async function main() {
   let config = {};
   try { config = JSON.parse(await readFile(path.join(HERE, 'config.json'), 'utf8')); } catch (e) {}
-  if (config.loop === false) { console.log('config.json says "loop": false: the chain ends here.'); return; }
-  /* The next run begins a cycle after this one began; starting it takes about a minute. */
-  const cycle = Math.max(10, Number(config.cycle) || 30);
-  const HOUR = (cycle - 1) * 60;
-  if (!token || !repo) { console.log('Not on GitHub: nothing to start.'); return; }
-  if (await waiting().catch(e => { console.log(String(e.message || e)); return 0; })) { console.log('Another run is waiting: it comes next and carries on.'); return; }
-  if (chain) {
-    const until = (started + HOUR) * 1000;
-    if (until > Date.now()) console.log(`Waiting ${Math.round((until - Date.now()) / 1000)} seconds: one run every ${cycle} minutes.`);
-    /* While waiting it looks every half minute whether somebody has started a run by hand, and gives way at once. */
-    while (Date.now() < until) {
-      await sleep(Math.min(30000, until - Date.now()));
-      if (await waiting().catch(() => 0)) { console.log('Another run is waiting: it comes next and carries on.'); return; }
-    }
+  if (config.loop === false) {
+    console.log('config.json says "loop": false: Collect chaining is off; not starting another run.');
+    return;
   }
-  /* The next run is named with what the last hours took in (stats.mjs wrote it), so the list of runs shows it.
-     Should the workflow not know that input, the run is started without it: the chain comes first. */
-  const note = String(process.env.INTAKE_NOTE || '').replace(/\s+/g, ' ').trim().slice(0, 150);
-  const start = inputs => api('/actions/workflows/collect.yml/dispatches', { method: 'POST', body: JSON.stringify({ ref: 'main', inputs }) });
-  let res = await start(note ? { chain: 'true', note } : { chain: 'true' });
-  if (!res.ok && note) { console.log('With the name: HTTP ' + res.status + '; once more without it.'); res = await start({ chain: 'true' }); }
-  console.log('The next run: HTTP ' + res.status + (res.ok ? '' : ' ' + (await res.text()).slice(0, 200)));
+  console.log('Collect chaining is disabled in the workflow; not starting another run.');
 }
+
 main().catch(e => { console.error(e.message || e); process.exit(0); });

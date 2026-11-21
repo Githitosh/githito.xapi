@@ -1,20 +1,14 @@
-# githito.xapi: collects by itself, for ever, one run every half hour, and publishes the result on the branch "api".
+# githito.xapi: one Collect run publishes Humor + News results on the branch "api".
 #
-# One run: the Humor page's stories (humor.mjs) and their publishing, what people reply to the news and the
-# headlines (news.mjs) and their publishing, then a wait until half an hour has passed since the run began, and
-# the start of the next run (next.mjs). So the runs follow one another without anybody starting them and without
-# a schedule: GitHub's own schedule starts runs hours late or not at all (runs set for the hour came five hours
-# late). The schedule below is not what makes it run; it only starts the chain again if it should ever break.
-#
-# To stop it: set "loop": false in config.json (the run then ends without starting another), or disable the
-# workflow in the Actions tab. "cycle" in config.json is the minutes from one run to the next.
+# Self-chaining is OFF. A previous half-hour loop (next.mjs workflow_dispatch with chain=true, plus a
+# schedule safeguard) kept respawning Collect; Cancel left the "Start the next run" step running
+# because it used if: always(), so the chain came back. That follow-up dispatch and the schedule are
+# removed. Manual Run workflow still works. "loop" in config.json is false; next.mjs will not
+# dispatch even if someone re-adds the step. To chain again later, restore the schedule / next step
+# deliberately — do not invent alternate triggers.
 name: Collect
-# In the list of runs a run of the chain is named with a small graph of what the last 12 hours took in
-# (stats.mjs makes it, next.mjs passes it on), so the list itself shows whether the collection goes well.
 run-name: ${{ inputs.note || 'Collect' }}
 on:
-  schedule:
-    - cron: '23 */3 * * *'   # only a safeguard: starts the chain again if it has stopped
   workflow_dispatch:
     inputs:
       rejudge:
@@ -30,11 +24,11 @@ on:
         type: string
         default: ''
       chain:
-        description: 'Start the next run when this one is done (the half-hour chain)'
+        description: 'Unused (self-chain disabled). Kept so old dispatches still validate.'
         type: boolean
         default: false
       note:
-        description: 'The name of the run in the list (the chain writes the intake of the last hours here)'
+        description: 'The name of the run in the list'
         type: string
         default: ''
       bootstrap:
@@ -45,16 +39,14 @@ permissions:
   contents: write
   actions: write
   issues: write
-# One run at a time. A run that is waiting gives way to a newer one, so there is never more than one chain.
+# One Collect at a time.
 concurrency:
   group: collect
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   collect:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    env:
-      CHAIN: ${{ (github.event_name == 'schedule' || inputs.chain) && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -62,7 +54,6 @@ jobs:
           node-version: 20
       - name: The API as it is now
         run: |
-          echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
           mkdir -p public
           if git fetch --depth=1 origin api 2>/dev/null; then git archive FETCH_HEAD | tar -x -C public; fi
       # News accounts (news-famous.json) and humor accounts (humor-accounts.json) both live only in the
@@ -236,10 +227,4 @@ jobs:
           git add -A
           git commit -q -m "API data $(date -u +%Y-%m-%dT%H:%MZ)"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" api
-      # The chain (next.mjs): a run waits until half an hour has passed since it began and starts the next run;
-      # a run started by hand starts the next one at once.
-      - name: Start the next run
-        if: ${{ always() }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node next.mjs
+      # Self-chain removed: no next.mjs workflow_dispatch here (Cancel used to still hit if: always()).

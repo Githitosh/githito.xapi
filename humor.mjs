@@ -5,7 +5,7 @@
    here ahead of time into v1/humor-<lang>.json; the page only reads that file.
 
    Only accounts listed in the private memo's humor-accounts.json (--memo or XAPI_MEMO_DIR) are read.
-   New accounts are recorded first by humor-find.mjs (~10 loving-reply accounts each half-hour run);
+   New accounts are recorded first by humor-find.mjs (~20 loving-reply accounts each half-hour run);
    this program then reads those registered accounts only. News accounts (news-famous.json) are a
    different file; this program does not read them.
 
@@ -128,17 +128,35 @@ function romanceText(st, lang) {
   } else if ((text.match(/[぀-ヿ]/g) || []).length < 1 || charLen(text) < 2) return '';
   return text;
 }
-/* The kind of talk, by what the two say. */
-export function talkKind(text) {
+/* Japan-time hour of a post (0–23), or -1 when unknown. */
+export function japanHour(iso) {
+  const ms = Date.parse(iso || 0);
+  if (!Number.isFinite(ms) || !ms) return -1;
+  return new Date(ms + 9 * 3600e3).getUTCHours();
+}
+/* morning 4–10, night 21–3, otherwise day. */
+export function daySlot(hour) {
+  if (hour >= 4 && hour < 11) return 'morning';
+  if (hour >= 21 || (hour >= 0 && hour < 4)) return 'night';
+  return 'day';
+}
+/* The kind of talk, by what the two say — and by when it was posted (おはよう at 15:00 is not morning). */
+export function talkKind(text, at) {
   const t = String(text || '');
-  if (/おは|朝だ|morning|rise and shine|sunshine|☀/i.test(t)) return 'morning';
-  if (/愛してる|あいしてる|いちゃ|イチャ|くっつ[きいこ]|甘え|一生離さない|ずっと一緒|大好き|だいすき|だいしゅき|好きだよ|すきだよ|ちゅ[ー〜♡っ！!\s]|ちゅ$|ぎゅ|i love you|love you (?:so much|more|forever)|cuddle|snuggle/i.test(t)) return 'icha';
-  if (/おやす|ねんね|すや|寝る|寝よ|眠|night|sleep|dream|💤|😴/i.test(t)) return 'night';
-  if (/ただいま|おかえり|おつかれ|お疲れ|がんばった|頑張った|home|welcome back/i.test(t)) return 'home';
-  if (/愛してる|あいしてる|いちゃ|イチャ|くっつ[きいこ]|甘え|一生離さない|ずっと一緒|i love you|cuddle|snuggle/i.test(t)) return 'icha';
-  if (/会いたい|あいたい|寂し|さみし|miss/i.test(t)) return 'miss';
-  if (/好き|すき|しゅき|愛|ぎゅ|ちゅ|なでなで|love|kiss|hug|♡|❤|💕/i.test(t)) return 'love';
-  return 'other';
+  let k = 'other';
+  if (/おは|朝だ|morning|rise and shine|sunshine|☀/i.test(t)) k = 'morning';
+  else if (/愛してる|あいしてる|いちゃ|イチャ|くっつ[きいこ]|甘え|一生離さない|ずっと一緒|大好き|だいすき|だいしゅき|好きだよ|すきだよ|ちゅ[ー〜♡っ！!\s]|ちゅ$|ぎゅ|i love you|love you (?:so much|more|forever)|cuddle|snuggle/i.test(t)) k = 'icha';
+  else if (/おやす|ねんね|すや|寝る|寝よ|眠|night|sleep|dream|💤|😴/i.test(t)) k = 'night';
+  else if (/ただいま|おかえり|おつかれ|お疲れ|がんばった|頑張った|home|welcome back/i.test(t)) k = 'home';
+  else if (/会いたい|あいたい|寂し|さみし|miss/i.test(t)) k = 'miss';
+  else if (/好き|すき|しゅき|愛|ぎゅ|ちゅ|なでなで|love|kiss|hug|♡|❤|💕/i.test(t)) k = 'love';
+  const h = japanHour(at);
+  if (h < 0) return k;
+  const slot = daySlot(h);
+  /* Greetings only keep their slot when the post was written in that part of the day. */
+  if (k === 'morning' && slot !== 'morning') return /好き|すき|愛|love|♡|❤/i.test(t) ? 'love' : 'other';
+  if (k === 'night' && slot !== 'night') return /好き|すき|愛|love|♡|❤/i.test(t) ? 'love' : 'other';
+  return k;
 }
 
 /* ---------- asking ---------- */
@@ -234,11 +252,12 @@ function pairFrom(pst, cst, lang) {
   if (!LOVE[lang].test(aText) && !mutual && charLen(aText) > (lang === 'en' ? 40 : 16)) return why('the post is about something else');
   if (PLAIN[lang].test(aText) && PLAIN[lang].test(bText)) return why('two plain greetings');
   const score = replyScore(bText, lang) + (CUTE[lang].test(aText) ? 4 : 0) + (ICHA[lang].test(aText) ? 4 : 0) + (mutual ? 6 : 0);
+  const at = whenOf(cst) || whenOf(pst);
   return {
-    id: bId, kind: talkKind(aText + ' ' + bText), mutual, score: Math.round(score * 10) / 10,
+    id: bId, kind: talkKind(aText + ' ' + bText, at), mutual, score: Math.round(score * 10) / 10,
     a: { handle: aHandle, text: aText, url: pst.url || `https://x.com/${aHandle}/status/${aId}`, id: aId },
     b: { handle: bHandle, text: bText, url: cst.url || `https://x.com/${bHandle}/status/${bId}`, id: bId },
-    at: whenOf(cst), found: stamp(),
+    at, found: stamp(),
   };
 }
 /* Somebody whose posts or profile speak of school is left out altogether, whatever else they write. */
@@ -471,7 +490,7 @@ async function build(lang) {
   };
   const keepOld = ACC.missing ? () => false : s => fresh(s) && ok(s) && registeredStory(s) && !skipped(s.a.handle) && !skipped(s.b.handle);
   const stories = found.filter(s => !skipped(s.a.handle) && !skipped(s.b.handle) && registeredStory(s))
-    .concat(old.filter(keepOld).map(s => ({ ...s, kind: talkKind(pairText(s)) }))).map(talk).slice(0, CONF.keep);
+    .concat(old.filter(keepOld).map(s => ({ ...s, kind: talkKind(pairText(s), s.at || s.found) }))).map(talk).slice(0, CONF.keep);
   const kinds = {};
   stories.forEach(s => { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
   console.log(`  ${lang}: ${count.timelines} timelines gave ${count.posts} answered posts; ${count.conversations} exchanges read whole (${count.otherWay} posts another way); ${count.stories} new stories. The file holds ${stories.length} ${JSON.stringify(kinds)}.`);

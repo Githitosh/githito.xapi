@@ -5,7 +5,7 @@
    posts leave the collection files (those files keep a few days; the stock the pages play keeps growing).
 
      v1/stock-news-ja.json   News: cards { id, h, n, g, at, kw, ja: [what, who], how, q? }
-     v1/stock-news-en.json   News in English: cards from the private memo's English accounts (nothing translated)
+     v1/stock-news-en.json   News in English: cards from registered English accounts (nothing translated)
      v1/stock-humor-ja.json  Reply News: talks { i, k, at, s, gl, m: [{ i, h, to, ja: [part, whole] }] }
                              (a talk is a conversation; a message is a card)
      both: videos [{ i, at, c: [card or talk ids], m? }], replies (to the accounts readers asked for), asked
@@ -37,6 +37,14 @@ const SIZE = Number(opt('size', 10)) || 10;
 const readJson = async (file, d) => { try { return JSON.parse(await readFile(file, 'utf8')); } catch (e) { return d; } };
 const time = x => Date.parse(x && x.at) || 0;
 const bounded = (list, max) => (max > 0 ? list.slice(0, max) : list);
+const shuffle = list => {
+  const a = list.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
 /* A card or a talk already in the stock is kept. This run's copy of the same id replaces it.
    Nothing is dropped for age. */
 function mergeStock(oldItems, freshItems, idOf) {
@@ -79,44 +87,49 @@ function deal(cards, before, { person, group, cap, tag, max = MAX, tail, version
   /* A cap that is already full takes only cards newer than its oldest video (older ones would be
      dealt, and dropped again, at every run). With no cap, every card not yet in a video can join one. */
   const oldest = max > 0 && kept.length >= max ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
-  let free = cards.filter(c => !used.has(c.id) && time(c) > oldest);
+  /* Shuffle so the same accounts are not always packed into the first videos. */
+  let free = shuffle(cards.filter(c => !used.has(c.id) && time(c) > oldest));
   /* tail: cards that close each video (what people said, three in ten), each used once. */
-  const tails = tail ? tail.pool.filter(c => !used.has(c.id)) : [];
+  const tails = tail ? shuffle(tail.pool.filter(c => !used.has(c.id))) : [];
   const made = [];
   const stamp = Date.now().toString(36);
+  let lastPeople = new Set();
   for (;;) {
     const end = [];
     if (tail) for (const c of tails) { if (end.length >= tail.count) break; if (!end.some(e => person(e)[0] === person(c)[0])) end.push(c); }
     const size = SIZE - end.length;
     if (free.length < size) break;
     end.forEach(c => tails.splice(tails.indexOf(c), 1));
+    free = shuffle(free);
     const v = [];
     const people = new Set();
     const groups = {};
-    /* Strict first; then a genre may come more often; then an account may come twice. */
-    for (let pass = 0; pass < 3 && v.length < size; pass++) {
+    /* Prefer accounts not in the previous video; then nobody twice; then genre cap; then relax. */
+    for (let pass = 0; pass < 4 && v.length < size; pass++) {
       for (const c of free) {
         if (v.length >= size) break;
         if (v.includes(c)) continue;
         const ps = person(c);
-        if (pass < 2 && ps.some(p => people.has(p))) continue;
+        if (pass < 3 && ps.some(p => people.has(p))) continue;
+        if (pass < 1 && ps.some(p => lastPeople.has(p))) continue;
         const g = group(c);
-        if (pass < 1 && g && (groups[g] || 0) >= cap) continue;
+        if (pass < 2 && g && (groups[g] || 0) >= cap) continue;
         v.push(c);
         ps.forEach(p => people.add(p));
         groups[g] = (groups[g] || 0) + 1;
       }
     }
     free = free.filter(c => !v.includes(c));
-    /* The same genre not twice in a row where that can be helped. */
+    /* The same genre not twice in a row where that can be helped; shuffle within that. */
     const order = [];
-    const left = v.slice();
+    const left = shuffle(v.slice());
     while (left.length) {
       const last = order.length ? group(order[order.length - 1]) : null;
       const k = left.findIndex(c => group(c) !== last);
       order.push(left.splice(k < 0 ? 0 : k, 1)[0]);
     }
     order.push(...end);
+    lastPeople = new Set(order.flatMap(c => person(c)));
     made.push({ i: 'v' + stamp + made.length.toString(36), ...(version ? { v: version } : {}), at: order.reduce((m, c) => (time(c) > Date.parse(m || 0) ? c.at : m), ''), ...(tag ? tag(order) : {}), c: order.map(c => c.id) });
   }
   const videos = bounded(kept.concat(made).sort((x, y) => (Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0)), max);
@@ -241,8 +254,56 @@ async function main() {
       const oldest = MAX > 0 && kept.length >= MAX ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
       let free = talks.filter(t => !used.has(String(t.i)) && time(t) > oldest);
       const DAY = { morning: 0, home: 1, love: 2, icha: 2, miss: 2, other: 2, night: 3 };
+      const jstHour = iso => { const ms = Date.parse(iso || 0); return ms ? new Date(ms + 9 * 3600e3).getUTCHours() : -1; };
+      const daySlot = h => (h >= 4 && h < 11 ? 'morning' : (h >= 21 || (h >= 0 && h < 4) ? 'night' : 'day'));
+      /* Prefer the hour the talk was posted (Japan time); fall back to the greeting kind. */
+      const talkSlot = t => {
+        const h = jstHour(t.at);
+        if (h >= 0) return daySlot(h);
+        if (t.k === 'morning') return 'morning';
+        if (t.k === 'night') return 'night';
+        return 'day';
+      };
       const stamp = Date.now().toString(36);
       built = [];
+      /* Build videos inside one time slot so morning greetings do not dominate evening plays. */
+      const bySlot = { morning: [], day: [], night: [] };
+      free.forEach(t => bySlot[talkSlot(t)].push(t));
+      const pack = (pool, slot) => {
+        let left = pool.slice();
+        while (left.reduce((n, t) => n + t.m.length, 0) >= SIZE - 2) {
+          const v = [];
+          const people = new Set();
+          let n = 0;
+          for (const strict of [true, false]) {
+            for (const t of left) {
+              if (n >= SIZE) break;
+              if (v.includes(t) || (n && n + t.m.length > SIZE + 2)) continue;
+              const who = [...new Set(t.m.map(x => String(x.h).toLowerCase()))];
+              if (strict && who.some(h => people.has(h))) continue;
+              v.push(t); who.forEach(h => people.add(h)); n += t.m.length;
+            }
+            if (n >= SIZE - 2) break;
+          }
+          if (n < SIZE - 2) break;
+          left = left.filter(t => !v.includes(t));
+          v.sort((x, y) => (DAY[x.k] ?? 2) - (DAY[y.k] ?? 2));
+          const g = Math.round(v.reduce((c, t) => c + t.gl * t.m.length, 0) / n * 10) / 10;
+          built.push({
+            i: 'v' + stamp + built.length.toString(36),
+            at: v.reduce((m, t) => (time(t) > Date.parse(m || 0) ? t.at : m), ''),
+            g, slot, ...(slot === 'morning' ? { m: 1 } : {}),
+            c: v.map(t => t.i),
+          });
+        }
+        return left;
+      };
+      const leftover = [];
+      leftover.push(...pack(bySlot.morning, 'morning'));
+      leftover.push(...pack(bySlot.day, 'day'));
+      leftover.push(...pack(bySlot.night, 'night'));
+      /* Rare leftovers of mixed hours: still one video, tagged by majority slot. */
+      free = leftover;
       while (free.reduce((n, t) => n + t.m.length, 0) >= SIZE - 2) {
         const v = [];
         const people = new Set();
@@ -259,11 +320,11 @@ async function main() {
         }
         if (n < SIZE - 2) break;
         free = free.filter(t => !v.includes(t));
-        v.sort((x, y) => (DAY[x.k] ?? 2) - (DAY[y.k] ?? 2));
-        const morningMsgs = v.filter(t => t.k === 'morning').reduce((c, t) => c + t.m.length, 0);
-        /* g: how much of the video is greetings said with love (0 to 2). */
+        const counts = { morning: 0, day: 0, night: 0 };
+        v.forEach(t => { counts[talkSlot(t)] += t.m.length; });
+        const slot = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
         const g = Math.round(v.reduce((c, t) => c + t.gl * t.m.length, 0) / n * 10) / 10;
-        built.push({ i: 'v' + stamp + built.length.toString(36), at: v.reduce((m, t) => (time(t) > Date.parse(m || 0) ? t.at : m), ''), g, ...(morningMsgs * 2 > n ? { m: 1 } : {}), c: v.map(t => t.i) });
+        built.push({ i: 'v' + stamp + built.length.toString(36), at: v.reduce((m, t) => (time(t) > Date.parse(m || 0) ? t.at : m), ''), g, slot, ...(slot === 'morning' ? { m: 1 } : {}), c: v.map(t => t.i) });
       }
       /* Greetings said with love first, then the newest. Every video stays unless --videos sets a cap. */
       videos = bounded(kept.concat(built).sort((x, y) => (Math.round((y.g || 0) * 2) - Math.round((x.g || 0) * 2)) || ((Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0))), MAX);

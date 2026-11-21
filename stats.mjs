@@ -215,16 +215,122 @@ function summary(hours, run, sums, now) {
   return out.join('\n');
 }
 
+/* ---------- stock videos / cards and account counts (names never shown) ---------- */
+async function inventory() {
+  const stockNewsJa = await readJson(path.join(OUT, 'v1', 'stock-news-ja.json'), {});
+  const stockNewsEn = await readJson(path.join(OUT, 'v1', 'stock-news-en.json'), {});
+  const stockHumor = await readJson(path.join(OUT, 'v1', 'stock-humor-ja.json'), {});
+  const peopleJa = await readJson(path.join(OUT, 'v1', 'people-ja.json'), {});
+  const peopleEn = await readJson(path.join(OUT, 'v1', 'people-en.json'), {});
+  const stock = {
+    newsJa: { videos: (stockNewsJa.videos || []).length, cards: (stockNewsJa.cards || []).length },
+    newsEn: { videos: (stockNewsEn.videos || []).length, cards: (stockNewsEn.cards || []).length },
+    humor: { videos: (stockHumor.videos || []).length, talks: (stockHumor.talks || []).length, frames: (stockHumor.talks || []).reduce((n, t) => n + ((t && t.m) || []).length, 0) },
+    people: { ja: (peopleJa.people || []).length, en: (peopleEn.people || []).length },
+  };
+  const memo = process.env.XAPI_MEMO_DIR ? path.resolve(process.env.XAPI_MEMO_DIR) : '';
+  const ha = memo ? await readJson(path.join(memo, 'humor-accounts.json'), {}) : {};
+  const req = memo ? await readJson(path.join(memo, 'accounts.json'), {}) : {};
+  const famous = await readJson(path.join(HERE, 'docs', 'memo', 'news-famous.json'), {});
+  const accounts = {
+    newsRegistered: (famous.ja || []).length + (famous.en || []).length,
+    humorRegistered: (Array.isArray(ha.ja) ? ha.ja.length : 0) + (Array.isArray(ha.en) ? ha.en.length : 0),
+    newsRequests: Array.isArray(req.accounts) ? req.accounts.length : 0,
+  };
+  const file = path.join(OUT, 'v1', 'stats.json');
+  const before = await readJson(file, {});
+  const hist = Array.isArray(before.inventory) ? before.inventory : [];
+  const point = { at: stamp(), stock, accounts };
+  const next = hist.filter(p => p && Date.now() - Date.parse(p.at || 0) < KEEP_DAYS * 24 * HOUR).concat(point).slice(-200);
+  await writeFile(file, JSON.stringify({ ...before, inventory: next, stock, accounts, updated: stamp() }) + '\n');
+  return { stock, accounts, hist: next, now: Date.now() };
+}
+function barRow(label, value, max, y, cls) {
+  const left = 200, W = 920, plotW = W - left - 40;
+  const w = max > 0 ? Math.max(value ? 2 : 0, plotW * value / max) : 0;
+  let s = `<text class="t1" x="24" y="${y + 14}" font-size="14">${esc(label)}</text>`;
+  s += `<text class="t2" x="${W - 24}" y="${y + 14}" font-size="13" text-anchor="end">${value}</text>`;
+  if (w) s += `<rect class="${cls}" x="${left}" y="${y}" width="${w.toFixed(1)}" height="18" rx="4"/>`;
+  return s;
+}
+function stockSvg(stock, accounts, now) {
+  const rows = [
+    ['ニュース動画（日本語）', stock.newsJa.videos, 's1'],
+    ['ニュースカード（日本語）', stock.newsJa.cards, 's1'],
+    ['ニュース動画（英語）', stock.newsEn.videos, 's1'],
+    ['ニュースカード（英語）', stock.newsEn.cards, 's1'],
+    ['ユーモア動画', stock.humor.videos, 's2'],
+    ['ユーモアコマ（メッセージ）', stock.humor.frames, 's2'],
+    ['登録ニュースアカウント数', accounts.newsRegistered, 's3'],
+    ['登録ユーモアアカウント数', accounts.humorRegistered, 's3'],
+    ['ニュースリクエスト数', accounts.newsRequests, 's3'],
+  ];
+  const max = Math.max(10, ...rows.map(r => r[1]));
+  const H = 80 + rows.length * 36;
+  let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 ${H}" width="920" height="${H}" role="img" aria-label="動画ストックと記録アカウント数" font-family="'Hiragino Sans','Noto Sans JP',Meiryo,system-ui,sans-serif">`;
+  s += '<style>.bg{fill:#fcfcfb}.t1{fill:#0b0b0b}.t2{fill:#52514e}.s1{fill:#2a78d6}.s2{fill:#eb6834}.s3{fill:#2f9e6b}'
+    + '@media (prefers-color-scheme:dark){.bg{fill:#1a1a19}.t1{fill:#f0efec}.t2{fill:#c3c2b7}.s1{fill:#3987e5}.s2{fill:#d95926}.s3{fill:#3cb879}}</style>';
+  s += `<rect class="bg" width="920" height="${H}" rx="8"/>`;
+  s += `<text class="t1" x="24" y="32" font-size="18" font-weight="700">動画ストックと記録アカウント（件数のみ・名前なし）</text>`;
+  s += `<text class="t2" x="896" y="32" font-size="12" text-anchor="end">${clock(now)} 更新</text>`;
+  rows.forEach((r, i) => { s += barRow(r[0], r[1], max, 52 + i * 36, r[2]); });
+  return s + '</svg>\n';
+}
+function chartsPage(repo) {
+  const base = repo ? `https://raw.githubusercontent.com/${repo}/api/v1` : '../public/v1';
+  return `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>githito.xapi グラフ</title>
+<style>
+  body { margin: 0; font: 15px/1.5 "Noto Sans JP", "Hiragino Sans", Meiryo, sans-serif; background: #f6f5f2; color: #1a1a19; }
+  main { max-width: 960px; margin: 0 auto; padding: 28px 16px 48px; }
+  h1 { font-size: 1.4rem; margin: 0 0 8px; }
+  p { color: #52514e; margin: 0 0 20px; }
+  figure { margin: 0 0 28px; background: #fff; border-radius: 12px; padding: 12px; box-shadow: 0 1px 0 rgba(0,0,0,.06); }
+  img { display: block; width: 100%; height: auto; }
+  a { color: #2a78d6; }
+</style>
+</head>
+<body>
+<main>
+  <h1>githito.xapi グラフ</h1>
+  <p>取り込み量・動画ストック数・記録アカウント数です。本文やアカウント名は出しません。</p>
+  <figure>
+    <figcaption>取り込み量（1時間ごと）</figcaption>
+    <img src="${base}/intake.svg" alt="取り込み量">
+  </figure>
+  <figure>
+    <figcaption>動画ストックと記録アカウント（件数）</figcaption>
+    <img src="${base}/stock.svg" alt="動画ストックとアカウント数">
+  </figure>
+  <p><a href="https://github.com/${repo || 'Githitosh/githito.xapi'}">リポジトリ</a> · データは <code>api</code> ブランチの <code>v1/</code></p>
+</main>
+</body>
+</html>
+`;
+}
+
 async function main() {
   const { hours, run, total: sums, now } = await record();
   await writeFile(path.join(OUT, 'v1', 'intake.svg'), svg(hours, sums, now));
+  const inv = await inventory();
+  await writeFile(path.join(OUT, 'v1', 'stock.svg'), stockSvg(inv.stock, inv.accounts, inv.now));
+  const repo = process.env.GITHUB_REPOSITORY || 'Githitosh/githito.xapi';
+  await mkdir(path.join(OUT, 'charts'), { recursive: true });
+  await writeFile(path.join(OUT, 'charts', 'index.html'), chartsPage(repo));
+  await mkdir(path.join(HERE, 'charts'), { recursive: true });
+  await writeFile(path.join(HERE, 'charts', 'index.html'), chartsPage(repo));
   await writeFile(path.join(OUT, '.changed'), stamp() + '\n');
-  const text = summary(hours, run, sums, now);
+  const text = summary(hours, run, sums, now)
+    + `\n### ストック（名前なし）\n\n| | 件数 |\n|---|---:|\n| ニュース動画 JA / EN | ${inv.stock.newsJa.videos} / ${inv.stock.newsEn.videos} |\n| ニュースカード JA / EN | ${inv.stock.newsJa.cards} / ${inv.stock.newsEn.cards} |\n| ユーモア動画 / コマ | ${inv.stock.humor.videos} / ${inv.stock.humor.frames} |\n| 登録ニュース / ユーモア / リクエスト | ${inv.accounts.newsRegistered} / ${inv.accounts.humorRegistered} / ${inv.accounts.newsRequests} |\n\n`;
   const line = note(hours, now);
   if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, text + '\n');
   else console.log(text);
-  /* For next.mjs: the next run is named with it. */
   if (process.env.GITHUB_ENV) await appendFile(process.env.GITHUB_ENV, 'INTAKE_NOTE=' + line + '\n');
   console.log('Intake: ' + line);
+  console.log(`Stock: news JA ${inv.stock.newsJa.videos}v/${inv.stock.newsJa.cards}c, EN ${inv.stock.newsEn.videos}v/${inv.stock.newsEn.cards}c; humor ${inv.stock.humor.videos}v/${inv.stock.humor.frames}f; accounts news ${inv.accounts.newsRegistered} humor ${inv.accounts.humorRegistered} req ${inv.accounts.newsRequests}`);
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(e => { console.error(e.message || e); process.exit(0); });

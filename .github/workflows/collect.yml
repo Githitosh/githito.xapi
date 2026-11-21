@@ -37,6 +37,10 @@ on:
         description: 'The name of the run in the list (the chain writes the intake of the last hours here)'
         type: string
         default: ''
+      bootstrap:
+        description: 'Humor: add ~500 romantic-reply accounts per language (long find; use once)'
+        type: boolean
+        default: false
 permissions:
   contents: write
   actions: write
@@ -120,24 +124,24 @@ jobs:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node collect.mjs --out public
-      # Humor: first record ~10 new romantic-reply accounts into humor-accounts.json (humor-find.mjs),
-      # then read only those registered accounts' timelines/conversations (humor.mjs) for stories.
+      # Humor: first record ~20 new romantic-reply accounts into humor-accounts.json (humor-find.mjs),
+      # then read only those registered accounts' timelines/conversations (humor.mjs) for ~100 stories.
       # The memo was read above. It needs two things set once by the owner: a private repository named
       # githito.memo (or the name in the repository variable MEMO_REPO, "owner/name"), and the secret
       # MEMO_TOKEN, a fine-grained token that may read and write that repository's contents. Without the
       # secret nothing is remembered and an account list is not saved.
-      - name: Humor accounts (about 10 new each run)
+      - name: Humor accounts (about 10 new each run; or ~500/lang when bootstrap)
         if: ${{ !inputs.only || inputs.only == 'humor' }}
         continue-on-error: true
         env:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
-        run: node humor-find.mjs
+        run: node humor-find.mjs ${{ inputs.bootstrap && '--bootstrap' || '' }}
       - name: Humor stories
         if: ${{ !inputs.only || inputs.only == 'humor' }}
         continue-on-error: true
         env:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
-        run: node humor.mjs --out public
+        run: node humor.mjs --out public ${{ inputs.bootstrap && '--minutes 25' || '' }}
       - name: Save the memo (the private repository)
         if: ${{ env.XAPI_MEMO_DIR != '' }}
         continue-on-error: true
@@ -182,12 +186,13 @@ jobs:
         env:
           XAPI_NO_SEARCH: ${{ inputs.rejudge && '1' || '' }}
         run: node news.mjs --out public ${{ inputs.searches && format('--searches {0}', inputs.searches) || '' }}
-      # News posts (people.mjs): only accounts in the private memo's news-famous.json. No built-in list.
-      # When that file is missing, no news account is read. Names are not printed.
-      - name: News posts from the private memo
+      # News posts (people.mjs): public docs/memo/news-famous.json (and memo overlay). ~100 cards/lang target.
+      # When that file is missing, no news account is read. Names are not printed in logs.
+      - name: News posts from registered accounts
         if: ${{ !inputs.only || inputs.only == 'news' }}
         continue-on-error: true
         run: node people.mjs --out public
+
       # English headlines already collected: kept only when the account is in that same file.
       - name: English news
         if: ${{ !inputs.only || inputs.only == 'news' }}

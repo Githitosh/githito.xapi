@@ -28,8 +28,9 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { stamp, readJson, charLen, cleanText, readFixupX } from './rules.mjs';
 import { lean, spread, deal } from './pick.mjs';
-import { slander, alcohol, tobacco } from './filters.mjs';
+import { slander, alcohol, tobacco, cruel, personal, advert, NEGATIVE, politicalTarget, ATTACK } from './filters.mjs';
 import { humorAccounts } from './humor-accounts.mjs';
+const harsh = t => !!(slander(t) || cruel(t) || personal(t) || advert(t) || NEGATIVE.test(String(t || '')) || politicalTarget(t) || ATTACK.test(String(t || '')));
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -243,8 +244,9 @@ function pairFrom(pst, cst, lang) {
   if (!aText) return why('the post may not play');
   if (!bText) return why('the reply may not play');
   if (charLen(aText) > LONG[lang] || charLen(bText) > LONG[lang]) return why('too long');
-  /* Insults, charges against a person, threats, anything pointing at where somebody lives (filters.mjs). */
-  if (slander(aText) || slander(bText)) return why('unkind words');
+  /* Insults, criticism, pile-ons, politics, ads, alcohol: never on Humor. */
+  if (harsh(aText) || harsh(bText)) return why('unkind or critical words');
+  if (alcohol(aText) || alcohol(bText) || tobacco(aText) || tobacco(bText)) return why('alcohol or smoking');
   if (followers(pst) > 20000 || followers(cst) > 20000) return why('famous');
   if (!LOVE[lang].test(bText)) return why('the reply is not loving');
   if (!(WORDS[lang].test(bText) || WORDS[lang].test(aText))) return why('a heart but no words');
@@ -473,7 +475,7 @@ async function build(lang) {
 
   const fresh = s => Date.now() - Date.parse(s.found || 0) < CONF.hours * 3600e3;
   const pairText = s => s.a.text + ' ' + s.b.text;
-  const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && !slander(pairText(s)) && !alcohol(pairText(s)) && !tobacco(pairText(s)) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !AGE.test(s.a.text) && !AGE.test(s.b.text) && !EMOJI_HINT.test(pairText(s))
+  const ok = s => cleanText(s.a.text) && cleanText(s.b.text) && !harsh(pairText(s)) && !alcohol(pairText(s)) && !tobacco(pairText(s)) && !UNSAFE_ROMANCE.test(pairText(s)) && !YOUTH.test(pairText(s)) && !AGE.test(s.a.text) && !AGE.test(s.b.text) && !EMOJI_HINT.test(pairText(s))
     && !FAN.test(pairText(s)) && !BODY.test(pairText(s)) && !FAMILY.test(pairText(s)) && (lang === 'en' || (!POLITE.test(s.a.text) && !POLITE.test(s.b.text)));
   /* Both speakers must be on humor-accounts.json: videos show only registered accounts' words. */
   const registeredStory = s => allow.has(String(s.a.handle).toLowerCase()) && allow.has(String(s.b.handle).toLowerCase());

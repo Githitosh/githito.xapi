@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-/* githito.xapi: every half hour, record ~10 new accounts that write humorous romantic replies.
+/* githito.xapi: every half hour, record ~20 new accounts that write humorous romantic replies.
 
    Videos are still made only from accounts listed in humor-accounts.json (the private memo).
-   This program finds fresh loving-reply accounts and appends them to that file (~10 per language
-   per run). It does not publish names. Ways in:
+   This program finds fresh loving-reply accounts and appends them to that file (~20 per language
+   per run; config humor.find). It does not publish names. Ways in:
      1. FxTwitter search for loving greetings (when search answers).
      2. Conversations of accounts already on the list: a partner who writes a loving reply is noted.
 
@@ -17,6 +17,8 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { humorAccounts, addHumorAccounts } from './humor-accounts.mjs';
+import { slander, cruel, personal, NEGATIVE, politicalTarget, ATTACK } from './filters.mjs';
+const harsh = t => !!(slander(t) || cruel(t) || personal(t) || NEGATIVE.test(String(t || '')) || politicalTarget(t) || ATTACK.test(String(t || '')));
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -25,11 +27,13 @@ const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 &&
 let FILE = {};
 try { FILE = (JSON.parse(await readFile(path.join(HERE, 'config.json'), 'utf8')).humor) || {}; } catch (e) {}
 const num = (name, d) => { const v = Number(opt(name, FILE[name])); return Number.isFinite(v) && v > 0 ? v : d; };
+const BOOT = flag('bootstrap');
 const CONF = {
   langs: (Array.isArray(FILE.langs) ? FILE.langs : ['ja', 'en']).filter(l => l === 'ja' || l === 'en'),
-  find: Math.min(30, num('find', 10)),
-  findSearches: num('findSearches', 16),
-  findTimelines: num('findTimelines', 20),
+  /* Bootstrap once: aim for hundreds of new accounts per language (CLI --find overrides). */
+  find: args.includes('--find') ? num('find', 20) : (BOOT ? 500 : Math.min(40, num('find', 20))),
+  findSearches: BOOT ? Math.max(num('findSearches', 28), 60) : num('findSearches', 28),
+  findTimelines: BOOT ? Math.max(num('findTimelines', 40), 120) : num('findTimelines', 40),
   dry: flag('dry'),
   noSearch: flag('no-search') || process.env.XAPI_NO_SEARCH === '1',
   memo: opt('memo', process.env.XAPI_MEMO_DIR || '') ? path.resolve(opt('memo', process.env.XAPI_MEMO_DIR || '')) : '',
@@ -38,21 +42,24 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const shuffle = list => list.map(x => [Math.random(), x]).sort((a, b) => a[0] - b[0]).map(x => x[1]);
 const stamp = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 
-/* Loving greeting searches: used only to discover accounts to register, not to fill videos directly. */
+/* Loving searches to discover accounts. Night/love/icha first so the list is not mostly morning greeters. */
 const SEARCHES = {
   ja: [
-    '(おはよう OR おはよ OR おはよー) (♡ OR 💕 OR 🥰 OR 😘 OR 好き OR 大好き OR ぎゅ)',
-    '(おはおは OR おはよーだよ OR おっはー OR おはよん OR おはよぉ OR おはよーん OR おはようなの)',
-    '(おやすみ OR おやすみなさい) (♡ OR 💕 OR 好き OR 大好き OR ぎゅー OR ちゅ)',
+    '(だいしゅき OR すきすき OR ぎゅーして OR ちゅー OR 会いたいよ OR なでなで OR いちゃいちゃ)',
+    '(愛してる OR あいしてる OR 大好きだよ OR 好きだよ) (♡ OR 💕 OR 🥰 OR ぎゅ)',
+    '(おやすみ OR おやすみなさい OR ねんね) (♡ OR 💕 OR 好き OR 大好き OR ぎゅー OR ちゅ)',
     '(おかえり OR ただいま) (♡ OR 好き OR ぎゅ OR 会いたかった OR ちゅ)',
-    '(だいしゅき OR すきすき OR ぎゅーして OR ちゅー OR 会いたいよ OR なでなで)',
+    '(寂しい OR さみしい OR 会いたい) (♡ OR 好き OR ぎゅ OR ちゅ)',
+    '(おはよう OR おはよ OR おはよー) (♡ OR 💕 OR 🥰 OR 😘 OR 好き OR 大好き OR ぎゅ)',
+    '(おはおは OR おっはー OR おはよん OR おはようなの)',
   ],
   en: [
-    '("morning sunshine" OR "morning babe" OR "rise and shine" OR "good morning beautiful" OR "good morning handsome")',
-    '("good morning" OR morning) ("love you" OR babe OR ❤ OR 😘 OR 🥰)',
+    '("love you more" OR "miss you more" OR "love ya" OR "my love" OR babe OR cuddle OR snuggle)',
+    '("i love you" OR "love you so much") (❤ OR 😘 OR 🥰)',
     '("night night" OR "nighty night" OR "sweet dreams" OR "sleep tight") (love OR babe OR ❤)',
-    '("love you more" OR "miss you more" OR "love ya" OR "my love" OR babe)',
-    '("i love you" OR "love you so much" OR cuddle OR snuggle)',
+    '("miss you" OR "come home" OR "welcome home") (love OR babe OR ❤)',
+    '("morning sunshine" OR "good morning beautiful" OR "good morning handsome")',
+    '("good morning" OR morning) ("love you" OR babe OR ❤ OR 😘 OR 🥰)',
   ],
 };
 
@@ -85,7 +92,7 @@ function mayRegister(st, lang) {
   const a = (st && st.author) || {};
   const bio = String(a.description || a.bio || '') + ' ' + String(a.name || '');
   if (!HANDLE.test(h) || !text) return null;
-  if (UNSAFE.test(text) || YOUTH.test(text) || NOT_A_PERSON.test(bio) || NOT_A_PERSON.test(text)) return null;
+  if (UNSAFE.test(text) || YOUTH.test(text) || NOT_A_PERSON.test(bio) || NOT_A_PERSON.test(text) || harsh(text)) return null;
   if (followers(st) > 20000 || a.protected) return null;
   if (!LOVE[lang].test(text)) return null;
   if (!(parentOf(st).id || /^(?:@\w+\s+)/.test(String(st.text || '')))) {
@@ -107,8 +114,11 @@ async function fxJson(url) {
 }
 async function search(q) {
   const now = Math.floor(Date.now() / 1000);
-  const start = now - 8 * 3600;
-  const full = `${q} since_time:${start} until_time:${start + 6 * 3600}`;
+  /* Bootstrap looks further back so many new accounts can be found in one run. */
+  const window = BOOT ? 48 * 3600 : 8 * 3600;
+  const span = BOOT ? 36 * 3600 : 6 * 3600;
+  const start = now - window;
+  const full = `${q} since_time:${start} until_time:${start + span}`;
   const d = await fxJson('https://api.fxtwitter.com/2/search?count=100&q=' + encodeURIComponent(full));
   return Array.isArray(d.results) ? d.results : [];
 }

@@ -26,6 +26,8 @@ import path from 'node:path';
 import { talkCards, replyCard, personCard, personCardEn } from './compose.mjs';
 import { newsAccounts } from './news-accounts.mjs';
 import { humorAccounts } from './humor-accounts.mjs';
+import { slander, cruel, personal, advert, NEGATIVE, politicalTarget, ATTACK } from './filters.mjs';
+const humorHarsh = t => !!(slander(t) || cruel(t) || personal(t) || advert(t) || NEGATIVE.test(String(t || '')) || politicalTarget(t) || ATTACK.test(String(t || '')));
 
 const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf('--' + name); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -227,8 +229,19 @@ async function main() {
     if (await save('stock-humor-ja.json', file)) changed = true;
     console.log('Reply News: humor-accounts.json is missing or empty, so the humor stock was cleared (unregistered talks must not stay).');
   } else {
-    const freshTalks = stories.map(talkCards).filter(t => t && talkKeep(t) && humorAllow(t) && !t.m.some(x => x.i && seenMsg.has(x.i)) && (t.m.forEach(x => x.i && seenMsg.add(x.i)), true));
-    const carriedTalks = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).filter(t => talkKeep(t) && humorAllow(t));
+    const jstH = iso => { const ms = Date.parse(iso || 0); return ms ? new Date(ms + 9 * 3600e3).getUTCHours() : -1; };
+    const slotOfHour = h => (h >= 4 && h < 11 ? 'morning' : (h >= 21 || (h >= 0 && h < 4) ? 'night' : 'day'));
+    const retimed = t => {
+      if (!t) return null;
+      const text = (t.m || []).map(x => (x.ja || []).join(' ')).join(' ');
+      if (humorHarsh(text)) return null;
+      const h = jstH(t.at);
+      if (h >= 0 && t.k === 'morning' && slotOfHour(h) !== 'morning') t = { ...t, k: /好き|すき|愛|love|♡|❤/i.test(text) ? 'love' : 'other' };
+      if (h >= 0 && t.k === 'night' && slotOfHour(h) !== 'night') t = { ...t, k: /好き|すき|愛|love|♡|❤/i.test(text) ? 'love' : 'other' };
+      return t;
+    };
+    const freshTalks = stories.map(talkCards).map(retimed).filter(t => t && talkKeep(t) && humorAllow(t) && !t.m.some(x => x.i && seenMsg.has(x.i)) && (t.m.forEach(x => x.i && seenMsg.add(x.i)), true));
+    const carriedTalks = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).map(retimed).filter(t => t && talkKeep(t) && humorAllow(t));
     /* A talk already in a video claims its messages first, so that video is not broken by a new copy of the same lines. */
     const freshIds = new Set(freshTalks.map(t => String(t.i)));
     const carriedIds = new Set(carriedTalks.map(t => String(t.i)));
@@ -249,7 +262,8 @@ async function main() {
       const rank = t => t.gl * 100 + Math.min(t.m.length, 8) * 6 + (Number(t.s) || 0);
       talks.sort((x, y) => (rank(y) - rank(x)) || (time(y) - time(x)));
       const byId = new Map(talks.map(t => [String(t.i), t]));
-      kept = bounded((Array.isArray(oldHumor.videos) ? oldHumor.videos : []).filter(v => v && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(String(id)))), MAX);
+      /* Keep only videos tagged with a time slot (older morning-heavy packs are remade). */
+      kept = bounded((Array.isArray(oldHumor.videos) ? oldHumor.videos : []).filter(v => v && v.slot && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(String(id)))), MAX);
       const used = new Set(kept.flatMap(v => v.c.map(String)));
       const oldest = MAX > 0 && kept.length >= MAX ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
       let free = talks.filter(t => !used.has(String(t.i)) && time(t) > oldest);

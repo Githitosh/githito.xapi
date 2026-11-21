@@ -12,10 +12,11 @@
 
    News cards are the private memo's accounts' own posts only (news-famous.json → people.mjs). A card
    that is not their own post, or whose account is not in that file, is dropped and is not refilled.
-   Humor talks are humor-accounts.json only: a talk with nobody on that list is dropped. When the humor
-   list is missing, existing anonymized talks/videos are kept (not wiped). News still clears when its
-   memo list is missing. Humor also rejudges past talks: ordinary replies without clear romantic
-   feeling (hearts / love words / funny romantic greetings) are pruned on every run.
+   Humor talks prefer humor-accounts.json (at least one real speaker on the list). Opaque s0/s1 talks
+   already passed that check. When the humor list is missing or prune would empty the file, existing
+   anonymized talks/videos are kept (never wiped), and fresh anonymized stories from humor-ja.json are
+   folded in so Reply News still has playable stock. News still clears when its memo list is missing.
+   Humor also rejudges past talks: ordinary replies without clear romantic feeling are pruned on every run.
 
    News stock aims at about 2000 cards (~5 per registered account). Playback packing prefers unused cards,
    then cards shown least recently, so the same clip does not loop. The half-hour collect loop and the
@@ -329,31 +330,129 @@ async function main() {
 
   /* Reply News / Humor: a video is conversations, whole, about ten messages: greetings said with love first,
      then the longest talks; nobody in two talks of one video; in each video the talks follow the day.
-     Only talks from registered humor accounts (humor-accounts.json). Past stock is rejudged every run:
-     ordinary replies without clear romantic feeling are pruned; published talks never include handles. */
+     Prefer talks with at least one registered humor account. Past stock is rejudged every run:
+     ordinary replies without clear romantic feeling are pruned; published talks never include real handles. */
   const humorMemo = await humorAccounts(opt('memo', process.env.XAPI_MEMO_DIR || ''));
   const humorReady = !humorMemo.missing && humorMemo.handles.size > 0;
-  /* Real handles → every author must be on the memo. Opaque "s0"/"s1" (or s index) → already filtered upstream. */
+  /* Real handles → at least one author on the memo (couple-first). Opaque "s0"/"s1" → already filtered upstream. */
   const humorAllow = t => {
     if (!t || !Array.isArray(t.m) || t.m.length < 2) return false;
     const keyed = t.m.every(x => x && (x.h || x.s != null));
     if (!keyed) return false;
-    if (t.m.every(x => x.h && !isOpaqueSpeaker(x.h))) {
-      return t.m.every(x => humorMemo.handles.has(String(x.h).replace(/^@+/, '').toLowerCase()));
-    }
-    return true;
+    const real = t.m.map(x => x.h).filter(h => h && !isOpaqueSpeaker(h));
+    if (!real.length) return true;
+    if (!humorReady) return true;
+    return real.some(h => humorMemo.handles.has(String(h).replace(/^@+/, '').toLowerCase()));
   };
   const stories = Array.isArray(humor.stories) ? humor.stories : [];
   const seenMsg = new Set();
+  const MIN_HUMOR_TALKS = 24;
+  const packHumorVideos = (rawTalks, oldVideos) => {
+    let videos = [];
+    let built = [];
+    let kept = [];
+    if (!rawTalks.length) return { videos, built, kept };
+    const rank = t => t.gl * 100 + Math.min(t.m.length, 8) * 6 + (Number(t.s) || 0);
+    const ordered = rawTalks.slice().sort((x, y) => (rank(y) - rank(x)) || (time(y) - time(x)));
+    const byId = new Map(ordered.map(t => [String(t.i), t]));
+    kept = bounded((Array.isArray(oldVideos) ? oldVideos : []).filter(v => v && v.slot && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(String(id)))), MAX);
+    const used = new Set(kept.flatMap(v => v.c.map(String)));
+    const oldest = MAX > 0 && kept.length >= MAX ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
+    let free = ordered.filter(t => !used.has(String(t.i)) && time(t) > oldest);
+    const DAY = { morning: 0, home: 1, love: 2, icha: 2, miss: 2, other: 2, night: 3 };
+    const jstHour = iso => { const ms = Date.parse(iso || 0); return ms ? new Date(ms + 9 * 3600e3).getUTCHours() : -1; };
+    const daySlot = h => (h >= 4 && h < 11 ? 'morning' : (h >= 21 || (h >= 0 && h < 4) ? 'night' : 'day'));
+    const talkSlot = t => {
+      const h = jstHour(t.at);
+      if (h >= 0) return daySlot(h);
+      if (t.k === 'morning') return 'morning';
+      if (t.k === 'night') return 'night';
+      return 'day';
+    };
+    const stamp = Date.now().toString(36);
+    built = [];
+    const bySlot = { morning: [], day: [], night: [] };
+    free.forEach(t => bySlot[talkSlot(t)].push(t));
+    const pack = (pool, slot) => {
+      let left = pool.slice();
+      while (left.reduce((n, t) => n + t.m.length, 0) >= SIZE - 2) {
+        const v = [];
+        const people = new Set();
+        let n = 0;
+        for (const strict of [true, false]) {
+          for (const t of left) {
+            if (n >= SIZE) break;
+            if (v.includes(t) || (n && n + t.m.length > SIZE + 2)) continue;
+            const who = [...new Set(t.m.map(speakerKey).filter(Boolean))];
+            if (strict && who.some(h => people.has(h))) continue;
+            v.push(t); who.forEach(h => people.add(h)); n += t.m.length;
+          }
+          if (n >= SIZE - 2) break;
+        }
+        if (n < SIZE - 2) break;
+        left = left.filter(t => !v.includes(t));
+        v.sort((x, y) => (DAY[x.k] ?? 2) - (DAY[y.k] ?? 2));
+        const g = Math.round(v.reduce((c, t) => c + t.gl * t.m.length, 0) / n * 10) / 10;
+        built.push({
+          i: 'v' + stamp + built.length.toString(36),
+          at: v.reduce((m, t) => (time(t) > Date.parse(m || 0) ? t.at : m), ''),
+          g, slot, ...(slot === 'morning' ? { m: 1 } : {}),
+          c: v.map(t => t.i),
+        });
+      }
+      return left;
+    };
+    const leftover = [];
+    leftover.push(...pack(bySlot.morning, 'morning'));
+    leftover.push(...pack(bySlot.day, 'day'));
+    leftover.push(...pack(bySlot.night, 'night'));
+    free = leftover;
+    while (free.reduce((n, t) => n + t.m.length, 0) >= SIZE - 2) {
+      const v = [];
+      const people = new Set();
+      let n = 0;
+      for (const strict of [true, false]) {
+        for (const t of free) {
+          if (n >= SIZE) break;
+          if (v.includes(t) || (n && n + t.m.length > SIZE + 2)) continue;
+          const who = [...new Set(t.m.map(speakerKey).filter(Boolean))];
+          if (strict && who.some(h => people.has(h))) continue;
+          v.push(t); who.forEach(h => people.add(h)); n += t.m.length;
+        }
+        if (n >= SIZE - 2) break;
+      }
+      if (n < SIZE - 2) break;
+      free = free.filter(t => !v.includes(t));
+      const counts = { morning: 0, day: 0, night: 0 };
+      v.forEach(t => { counts[talkSlot(t)] += t.m.length; });
+      const slot = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+      const g = Math.round(v.reduce((c, t) => c + t.gl * t.m.length, 0) / n * 10) / 10;
+      built.push({ i: 'v' + stamp + built.length.toString(36), at: v.reduce((m, t) => (time(t) > Date.parse(m || 0) ? t.at : m), ''), g, slot, ...(slot === 'morning' ? { m: 1 } : {}), c: v.map(t => t.i) });
+    }
+    videos = bounded(kept.concat(built).sort((x, y) => (Math.round((y.g || 0) * 2) - Math.round((x.g || 0) * 2)) || ((Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0))), MAX);
+    return { videos, built, kept };
+  };
+  const storiesToTalks = list => list.map(talkCards).filter(t => {
+    if (!t || !talkKeep(t)) return false;
+    const text = (t.m || []).map(x => (x.ja || []).join(' ')).join(' ');
+    return !humorHarsh(text);
+  }).map(t => pruneRomanticTalk(t, 'ja')).filter(Boolean);
+
   if (!humorReady) {
-    /* Memo briefly missing must not wipe Reply News. Keep last stock, strip any leftover real handles. */
-    const keptTalks = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).map(anonymizeTalk).filter(talkKeep);
-    const byId = new Set(keptTalks.map(t => String(t.i)));
-    const keptVideos = (Array.isArray(oldHumor.videos) ? oldHumor.videos : [])
-      .filter(v => v && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(String(id))));
+    /* Memo missing must not wipe Reply News. Keep last stock, fold in fresh anonymized stories, pack videos if needed. */
+    const prior = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).map(anonymizeTalk).filter(talkKeep);
+    const fresh = storiesToTalks(stories).map(anonymizeTalk).filter(Boolean);
+    const merged = mergeStock(prior, fresh, t => t.i);
+    const keptTalks = merged.items;
+    let keptVideos = (Array.isArray(oldHumor.videos) ? oldHumor.videos : [])
+      .filter(v => v && Array.isArray(v.c) && v.c.length && v.c.every(id => keptTalks.some(t => String(t.i) === String(id))));
+    if ((!keptVideos.length || keptTalks.length >= MIN_HUMOR_TALKS) && keptTalks.length) {
+      const packed = packHumorVideos(keptTalks, keptVideos);
+      if (packed.videos.length) keptVideos = packed.videos;
+    }
     const file = { version: 3, lang: 'ja', made, principles, size: SIZE, privacy: 'text-only', talks: keptTalks, videos: keptVideos, replies, asked };
     if (await save('stock-humor-ja.json', file)) changed = true;
-    console.log(`Reply News: humor-accounts.json is missing or empty; kept ${keptTalks.length} anonymized talks / ${keptVideos.length} videos (not cleared).`);
+    console.log(`Reply News: humor-accounts.json is missing or empty; kept ${keptTalks.length} anonymized talks / ${keptVideos.length} videos (not cleared; bootstrap stories folded in).`);
   } else {
     const jstH = iso => { const ms = Date.parse(iso || 0); return ms ? new Date(ms + 9 * 3600e3).getUTCHours() : -1; };
     const slotOfHour = h => (h >= 4 && h < 11 ? 'morning' : (h >= 21 || (h >= 0 && h < 4) ? 'night' : 'day'));
@@ -389,97 +488,25 @@ async function main() {
       t.m.forEach(x => x.i && talkSeen.add(String(x.i)));
       rawTalks.push(t);
     }
-    let videos = [];
-    let built = [];
-    let kept = [];
-    if (rawTalks.length) {
-      const rank = t => t.gl * 100 + Math.min(t.m.length, 8) * 6 + (Number(t.s) || 0);
-      rawTalks.sort((x, y) => (rank(y) - rank(x)) || (time(y) - time(x)));
-      const byId = new Map(rawTalks.map(t => [String(t.i), t]));
-      /* Keep only videos tagged with a time slot whose talks all survived romance rejudge. */
-      kept = bounded((Array.isArray(oldHumor.videos) ? oldHumor.videos : []).filter(v => v && v.slot && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(String(id)))), MAX);
-      const used = new Set(kept.flatMap(v => v.c.map(String)));
-      const oldest = MAX > 0 && kept.length >= MAX ? Math.min(...kept.map(v => Date.parse(v.at || 0) || 0)) : -Infinity;
-      let free = rawTalks.filter(t => !used.has(String(t.i)) && time(t) > oldest);
-      const DAY = { morning: 0, home: 1, love: 2, icha: 2, miss: 2, other: 2, night: 3 };
-      const jstHour = iso => { const ms = Date.parse(iso || 0); return ms ? new Date(ms + 9 * 3600e3).getUTCHours() : -1; };
-      const daySlot = h => (h >= 4 && h < 11 ? 'morning' : (h >= 21 || (h >= 0 && h < 4) ? 'night' : 'day'));
-      /* Prefer the hour the talk was posted (Japan time); fall back to the greeting kind. */
-      const talkSlot = t => {
-        const h = jstHour(t.at);
-        if (h >= 0) return daySlot(h);
-        if (t.k === 'morning') return 'morning';
-        if (t.k === 'night') return 'night';
-        return 'day';
-      };
-      const stamp = Date.now().toString(36);
+    let { videos, built, kept } = packHumorVideos(rawTalks, oldHumor.videos);
+    let talks = rawTalks.map(anonymizeTalk).filter(Boolean);
+    /* Never wipe Reply News to empty: if prune left nothing, keep the previous anonymized stock. */
+    if (!talks.length) {
+      talks = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).map(anonymizeTalk).filter(talkKeep);
+      const byId = new Set(talks.map(t => String(t.i)));
+      videos = (Array.isArray(oldHumor.videos) ? oldHumor.videos : [])
+        .filter(v => v && Array.isArray(v.c) && v.c.length && v.c.every(id => byId.has(String(id))));
       built = [];
-      /* Build videos inside one time slot so morning greetings do not dominate evening plays. */
-      const bySlot = { morning: [], day: [], night: [] };
-      free.forEach(t => bySlot[talkSlot(t)].push(t));
-      const pack = (pool, slot) => {
-        let left = pool.slice();
-        while (left.reduce((n, t) => n + t.m.length, 0) >= SIZE - 2) {
-          const v = [];
-          const people = new Set();
-          let n = 0;
-          for (const strict of [true, false]) {
-            for (const t of left) {
-              if (n >= SIZE) break;
-              if (v.includes(t) || (n && n + t.m.length > SIZE + 2)) continue;
-              const who = [...new Set(t.m.map(speakerKey).filter(Boolean))];
-              if (strict && who.some(h => people.has(h))) continue;
-              v.push(t); who.forEach(h => people.add(h)); n += t.m.length;
-            }
-            if (n >= SIZE - 2) break;
-          }
-          if (n < SIZE - 2) break;
-          left = left.filter(t => !v.includes(t));
-          /* Within a slot, order by kind so morning/home/night/love feel like realtime reply news. */
-          v.sort((x, y) => (DAY[x.k] ?? 2) - (DAY[y.k] ?? 2));
-          const g = Math.round(v.reduce((c, t) => c + t.gl * t.m.length, 0) / n * 10) / 10;
-          built.push({
-            i: 'v' + stamp + built.length.toString(36),
-            at: v.reduce((m, t) => (time(t) > Date.parse(m || 0) ? t.at : m), ''),
-            g, slot, ...(slot === 'morning' ? { m: 1 } : {}),
-            c: v.map(t => t.i),
-          });
-        }
-        return left;
-      };
-      const leftover = [];
-      leftover.push(...pack(bySlot.morning, 'morning'));
-      leftover.push(...pack(bySlot.day, 'day'));
-      leftover.push(...pack(bySlot.night, 'night'));
-      /* Rare leftovers of mixed hours: still one video, tagged by majority slot. */
-      free = leftover;
-      while (free.reduce((n, t) => n + t.m.length, 0) >= SIZE - 2) {
-        const v = [];
-        const people = new Set();
-        let n = 0;
-        for (const strict of [true, false]) {
-          for (const t of free) {
-            if (n >= SIZE) break;
-            if (v.includes(t) || (n && n + t.m.length > SIZE + 2)) continue;
-            const who = [...new Set(t.m.map(speakerKey).filter(Boolean))];
-            if (strict && who.some(h => people.has(h))) continue;
-            v.push(t); who.forEach(h => people.add(h)); n += t.m.length;
-          }
-          if (n >= SIZE - 2) break;
-        }
-        if (n < SIZE - 2) break;
-        free = free.filter(t => !v.includes(t));
-        const counts = { morning: 0, day: 0, night: 0 };
-        v.forEach(t => { counts[talkSlot(t)] += t.m.length; });
-        const slot = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
-        const g = Math.round(v.reduce((c, t) => c + t.gl * t.m.length, 0) / n * 10) / 10;
-        built.push({ i: 'v' + stamp + built.length.toString(36), at: v.reduce((m, t) => (time(t) > Date.parse(m || 0) ? t.at : m), ''), g, slot, ...(slot === 'morning' ? { m: 1 } : {}), c: v.map(t => t.i) });
-      }
-      /* Greetings said with love first, then the newest. Every video stays unless --videos sets a cap. */
-      videos = bounded(kept.concat(built).sort((x, y) => (Math.round((y.g || 0) * 2) - Math.round((x.g || 0) * 2)) || ((Date.parse(y.at || 0) || 0) - (Date.parse(x.at || 0) || 0))), MAX);
+      kept = videos.slice();
+      console.log(`Reply News: prune left no talks; kept prior ${talks.length} anonymized talks / ${videos.length} videos (not cleared).`);
+    } else if (talks.length < MIN_HUMOR_TALKS || !videos.length) {
+      /* Thin stock: fold prior anonymized talks back in so time-band videos stay playable. */
+      const prior = (Array.isArray(oldHumor.talks) ? oldHumor.talks : []).map(anonymizeTalk).filter(talkKeep);
+      const merged = mergeStock(prior, talks, t => t.i);
+      talks = merged.items;
+      const packed = packHumorVideos(talks, videos.length ? videos : oldHumor.videos);
+      if (packed.videos.length) { videos = packed.videos; built = packed.built; kept = packed.kept; }
     }
-    const talks = rawTalks.map(anonymizeTalk).filter(Boolean);
-    /* Always write: empty / pruned talk list clears ordinary and unregistered content from public stock. */
     const file = { version: 3, lang: 'ja', made, principles, size: SIZE, privacy: 'text-only', talks, videos, replies, asked };
     if (await save('stock-humor-ja.json', file)) changed = true;
     if (talks.length) {
@@ -487,7 +514,7 @@ async function main() {
       const gl = [0, 1, 2].map(g => talks.filter(t => t.gl === g).length);
       const addedN = talks.filter(t => freshIds.has(String(t.i)) && !carriedIds.has(String(t.i))).length;
       console.log(`Reply News: ${talks.length} clearly-romantic talks, handles stripped (${addedN} added this run, ${talks.length - addedN} already in the stock; messages per talk ${JSON.stringify(msgs)}; greeting with love ${gl[2]}, one of the two ${gl[1]}, neither ${gl[0]}); videos: ${videos.length} (${built.filter(v => videos.includes(v)).length} new, ${kept.filter(v => videos.includes(v)).length} kept, ${videos.filter(v => v.m).length} of the morning).`);
-    } else console.log('Reply News: no clearly-romantic talks from the memo accounts; humor stock cleared of ordinary/unregistered content.');
+    } else console.log('Reply News: no anonymized talks available yet (memo ready, waiting for romance stock).');
   }
 
   if (changed) await writeFile(path.join(OUT, '.changed'), made + '\n');
